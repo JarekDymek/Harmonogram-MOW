@@ -1,0 +1,169 @@
+{
+  "updatedAt": "2026-06-15T00:00:00.000Z",
+  "educator": "Dymek",
+  "weeks": [
+    {
+      "weekNumber": 41,
+      "label": "Tydzień 41",
+      "range": "08.06 – 14.06.2026",
+      "dateFrom": "2026-06-08",
+      "dateTo": "2026-06-14",
+      "source": "Przykład na podstawie dokumentu internatu",
+      "days": [
+        {
+          "key": "mon",
+          "name": "PON",
+          "date": "08.06",
+          "isoDate": "2026-06-08",
+          "shifts": [
+            {
+              "type": "vi",
+              "label": "Gr. VI",
+              "hours": "14:30–22:00",
+              "start": "14:30",
+              "end": "22:00",
+              "duration": 7.5,
+              "replacesPerson": "Dembiński"
+            }
+          ],
+          "hoursDay": 7.5,
+          "weekend": false,
+          "zmieniam": "",
+          "zmienia": ""
+        },
+        {
+          "key": "tue",
+          "name": "WT",
+          "date": "09.06",
+          "isoDate": "2026-06-09",
+          "shifts": [],
+          "hoursDay": 0,
+          "weekend": false,
+          "zmieniam": "",
+          "zmienia": ""
+        },
+        {
+          "key": "wed",
+          "name": "ŚR",
+          "date": "10.06",
+          "isoDate": "2026-06-10",
+          "shifts": [
+            {
+              "type": "vi",
+              "label": "Gr. VI",
+              "hours": "06:00–08:00",
+              "start": "06:00",
+              "end": "08:00",
+              "duration": 2,
+              "replacedByPerson": "Dembiński"
+            },
+            {
+              "type": "noc",
+              "label": "Noc",
+              "hours": "22:00–06:00",
+              "start": "22:00",
+              "end": "06:00",
+              "duration": 8
+            }
+          ],
+          "hoursDay": 10,
+          "weekend": false,
+          "zmieniam": "",
+          "zmienia": ""
+        },
+        {
+          "key": "thu",
+          "name": "CZW",
+          "date": "11.06",
+          "isoDate": "2026-06-11",
+          "shifts": [
+            {
+              "type": "vi",
+              "label": "Gr. VI",
+              "hours": "06:00–08:00",
+              "start": "06:00",
+              "end": "08:00",
+              "duration": 2,
+              "replacedByPerson": "Dembiński"
+            },
+            {
+              "type": "vi",
+              "label": "Gr. VI",
+              "hours": "14:00–22:00",
+              "start": "14:00",
+              "end": "22:00",
+              "duration": 8
+            }
+          ],
+          "hoursDay": 10,
+          "weekend": false,
+          "zmieniam": "",
+          "zmienia": ""
+        },
+        {
+          "key": "fri",
+          "name": "PT",
+          "date": "12.06",
+          "isoDate": "2026-06-12",
+          "shifts": [],
+          "hoursDay": 0,
+          "weekend": false,
+          "zmieniam": "",
+          "zmienia": ""
+        },
+        {
+          "key": "sat",
+          "name": "SOB",
+          "date": "13.06",
+          "isoDate": "2026-06-13",
+          "shifts": [
+            {
+              "type": "vi",
+              "label": "Gr. VI",
+              "hours": "16:00–22:00",
+              "start": "16:00",
+              "end": "22:00",
+              "duration": 6,
+              "replacesPerson": "Kowalska"
+            }
+          ],
+          "hoursDay": 6,
+          "weekend": true,
+          "zmieniam": "",
+          "zmienia": ""
+        },
+        {
+          "key": "sun",
+          "name": "ND",
+          "date": "14.06",
+          "isoDate": "2026-06-14",
+          "shifts": [],
+          "hoursDay": 0,
+          "weekend": true,
+          "zmieniam": "",
+          "zmienia": ""
+        }
+      ],
+      "summary": {
+        "totalHours": 33.5,
+        "overtimeHours": 9.5,
+        "weekendHours": 6,
+        "weekendWorkDays": 1
+      }
+    }
+  ],
+  "calendarEducator": "Dymek",
+  "alerts": [
+    {
+      "id": "sample-correction-alert",
+      "type": "correction",
+      "weekStart": "2026-06-15",
+      "range": "15.06 – 21.06.2026",
+      "filename": "42. 15 - 21.06.2026r. (1).docx",
+      "subject": "Korekta grafiku Gr 6",
+      "messageDate": "2026-06-15T10:00:00.000Z",
+      "createdAt": "2026-06-15T10:00:00.000Z",
+      "message": "Przykład: wykryto korektę grafiku dla tygodnia 15.06 – 21.06.2026."
+    }
+  ]
+}

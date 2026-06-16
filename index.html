@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#050505">
+  <meta name="description" content="Harmonogram pracy MOW: Gmail, korekty, historia godzin, weekendy i Google Calendar.">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/styles.css">
+  <title>Harmonogram MOW v12</title>
+</head>
+<body>
+  <header class="app-header">
+    <div class="title-block">
+      <p class="eyebrow">MOW • Grafik pracy</p>
+      <h1>Harmonogram MOW</h1>
+      <p id="lastSync" class="subline">Ładowanie danych…</p>
+    </div>
+    <button id="installBtn" class="ghost hidden" type="button">Zainstaluj</button>
+  </header>
+
+  <main class="app-main">
+    <section class="toolbar card" aria-label="Główne akcje">
+      <button id="refreshBtn" class="primary" type="button">Pobierz / synchronizuj</button>
+      <button id="dashboardBtn" class="secondary" type="button">Tylko podgląd</button>
+      <button id="testBackendBtn" class="secondary" type="button">Test backendu</button>
+      <button id="settingsBtn" class="secondary" type="button">Ustawienia</button>
+      <button id="notifyBtn" class="secondary" type="button">Powiadomienia</button>
+      <button id="sampleBtn" class="secondary" type="button">Dane testowe</button>
+    </section>
+
+    <section id="settingsPanel" class="card settings hidden" aria-label="Ustawienia aplikacji">
+      <div class="settings-grid">
+        <div>
+          <h2>Ustawienia połączenia</h2>
+          <label>
+            Adres backendu Google Apps Script
+            <input id="backendUrl" type="url" autocomplete="off" placeholder="https://script.google.com/macros/s/.../exec">
+          </label>
+          <label>
+            Wychowawca wyświetlany w aplikacji
+            <input id="educator" list="educatorList" type="text" autocomplete="name" value="Dymek" placeholder="np. Kowalska, Dembiński, Piłat">
+            <datalist id="educatorList"></datalist>
+          </label>
+        </div>
+
+        <div>
+          <h2>Bezpieczeństwo</h2>
+          <label>
+            VIEW_TOKEN — dla osób, które mają tylko oglądać
+            <input id="viewToken" type="password" autocomplete="off" placeholder="view_...">
+          </label>
+          <label>
+            ADMIN_TOKEN — tylko dla Ciebie
+            <input id="adminToken" type="password" autocomplete="off" placeholder="admin_...">
+          </label>
+          <p class="hint"><strong>Nie dawaj ADMIN_TOKEN innym osobom.</strong> Bez ADMIN_TOKEN aplikacja nie uruchomi skanowania Gmaila ani zapisu do Kalendarza.</p>
+        </div>
+
+        <div>
+          <h2>Układ ekranu</h2>
+          <label>
+            Tryb interfejsu
+            <select id="layoutMode">
+              <option value="auto">Auto — wykryj urządzenie</option>
+              <option value="phone">Telefon</option>
+              <option value="tablet">iPad / tablet</option>
+              <option value="desktop">PC</option>
+            </select>
+          </label>
+          <label>
+            Tryb udostępniania na tym urządzeniu
+            <select id="shareMode">
+              <option value="full">Pełny widok</option>
+              <option value="limited">Widok uproszczony dla innych</option>
+            </select>
+          </label>
+          <div class="row-actions compact-actions">
+            <button id="saveSettingsBtn" class="primary" type="button">Zapisz</button>
+            <button id="clearCacheBtn" class="danger" type="button">Wyczyść dane</button>
+          </div>
+        </div>
+      </div>
+      <p class="hint"><strong>Kalendarz Google jest zablokowany tylko dla Dymka.</strong> Zmiana nazwiska zmienia widok w aplikacji, ale nie dopisuje planów innych wychowawców do Twojego Kalendarza Google.</p>
+    </section>
+
+    <section id="securityNotice"></section>
+    <section id="backendDiagnostics"></section>
+    <section id="alertsView"></section>
+    <section id="todayView"></section>
+    <section id="changesView"></section>
+
+    <nav id="weekTabs" class="tabs" aria-label="Zakładki tygodni"></nav>
+    <section class="card week-tools" aria-label="Narzędzia tygodnia">
+      <label>
+        Widok dni
+        <select id="dayFilter">
+          <option value="all">Wszystkie dni</option>
+          <option value="work">Tylko dni pracy</option>
+          <option value="changed">Tylko dni ze zmianami</option>
+          <option value="warnings">Tylko ostrzeżenia</option>
+        </select>
+      </label>
+      <button id="printBtn" class="secondary" type="button">Druk / PDF</button>
+      <button id="shareViewBtn" class="secondary" type="button">Link do podglądu</button>
+    </section>
+    <section id="weekView"></section>
+
+    <section class="card history-card">
+      <div class="section-title">
+        <h2>Historia godzin</h2>
+        <div class="row-actions history-actions">
+          <button id="exportBtn" class="secondary" type="button">Eksport CSV</button>
+        </div>
+      </div>
+      <div id="historyView"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="assets/app.js" type="module"></script>
+</body>
+</html>
