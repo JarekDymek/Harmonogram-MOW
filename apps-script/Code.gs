@@ -14,6 +14,7 @@ const CONFIG = {
   maxAlerts: 30,
   scanPastDays: 21,
   scanFutureDays: 35,
+  dashboardWeekOffsets: [-7, 0, 7, 14],
   triggerMinutes: 30,
   aliases: {
     Dymek: ['Dymek', 'Jarek Dymek', 'Jarosław Dymek', 'J. Dymek']
@@ -224,7 +225,7 @@ function manualRefresh() {
 function getDashboardData(educator) {
   const who = normalizeEducatorInput_(educator || CONFIG.defaultEducator);
   const currentMonday = mondayOf_(new Date());
-  const weeks = [-7, 0, 7].map(function (shiftDays) {
+  const weeks = CONFIG.dashboardWeekOffsets.map(function (shiftDays) {
     const weekStart = toIsoDate_(addDays_(currentMonday, shiftDays));
     return buildWeekView_(weekStart, who);
   });
@@ -237,6 +238,7 @@ function getDashboardData(educator) {
     sourceEmail: CONFIG.sourceEmail,
     calendarId: CONFIG.calendarId,
     generatedAt: new Date().toISOString(),
+    dashboardWeekOffsets: CONFIG.dashboardWeekOffsets,
     weeks: weeks,
     history: buildHistory_(who),
     alerts: getAlerts_(),
