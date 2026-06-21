@@ -622,7 +622,7 @@ function parseInternatSchedule_(text, weekStartIso, educator) {
       shift.replacedByPerson = '';
       shift.zmieniam = '';
       shift.zmienia = '';
-      day.shifts.push(shift);
+      addShiftToDays_(days, shift);
     });
   }
 
@@ -635,6 +635,62 @@ function parseInternatSchedule_(text, weekStartIso, educator) {
   });
 
   return { days: days, totalHours: round2_(days.reduce(function (sum, day) { return sum + day.hoursDay; }, 0)) };
+}
+
+function addShiftToDays_(days, shift) {
+  if (!shift || !shift.startIso || !shift.endIso) return;
+  if (shift.type !== 'noc') {
+    const dayIndex = findDayIndexByIso_(days, shift.startIso);
+    if (dayIndex >= 0) days[dayIndex].shifts.push(shift);
+    return;
+  }
+
+  const start = new Date(shift.startIso);
+  const end = new Date(shift.endIso);
+  if (!isFinite(start.getTime()) || !isFinite(end.getTime()) || end <= start) return;
+
+  const startMidnight = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1);
+  if (end <= startMidnight) {
+    const dayIndex = findDayIndexByIso_(days, shift.startIso);
+    if (dayIndex >= 0) days[dayIndex].shifts.push(shift);
+    return;
+  }
+
+  const firstPart = cloneShiftPart_(shift, start, startMidnight);
+  const secondPart = cloneShiftPart_(shift, startMidnight, end);
+  firstPart.nightPart = 'start';
+  firstPart.end = '24:00';
+  firstPart.hours = firstPart.start + '–24:00';
+  secondPart.nightPart = 'end';
+
+  const firstDayIndex = typeof shift.dayIndex === 'number' ? shift.dayIndex : findDayIndexByIso_(days, firstPart.startIso);
+  const secondDayIndex = firstDayIndex >= 0 ? firstDayIndex + 1 : findDayIndexByIso_(days, secondPart.startIso);
+  if (firstDayIndex >= 0 && firstPart.hoursValue > 0) days[firstDayIndex].shifts.push(firstPart);
+  if (secondDayIndex >= 0 && secondDayIndex < days.length && secondPart.hoursValue > 0) days[secondDayIndex].shifts.push(secondPart);
+}
+
+function cloneShiftPart_(shift, start, end) {
+  const hoursValue = round2_((end.getTime() - start.getTime()) / 3600000);
+  const copy = {};
+  Object.keys(shift).forEach(function (key) { copy[key] = shift[key]; });
+  copy.hours = formatTime_(start) + '–' + formatTime_(end);
+  copy.start = formatTime_(start);
+  copy.end = formatTime_(end);
+  copy.startIso = start.toISOString();
+  copy.endIso = end.toISOString();
+  copy.hoursValue = hoursValue;
+  copy.duration = hoursValue;
+  return copy;
+}
+
+function findDayIndexByIso_(days, iso) {
+  const date = new Date(iso);
+  if (!isFinite(date.getTime())) return -1;
+  const key = toIsoDate_(date);
+  for (let i = 0; i < days.length; i++) {
+    if (days[i].isoDate === key) return i;
+  }
+  return -1;
 }
 
 function extractVacationGroupBlocks_(text) {
@@ -1028,7 +1084,7 @@ function buildShift_(weekStartIso, dayIndex, start, end, type, label) {
   let endDate = makeDateTime_(date, end.hour, end.minute);
   if (endDate <= startDate) endDate = addDays_(endDate, 1);
   const hoursValue = round2_((endDate.getTime() - startDate.getTime()) / 3600000);
-  return { type: type, label: label, hours: formatTime_(startDate) + '–' + formatTime_(endDate), start: formatTime_(startDate), end: formatTime_(endDate), startIso: startDate.toISOString(), endIso: endDate.toISOString(), hoursValue: hoursValue, duration: hoursValue };
+  return { type: type, label: label, dayIndex: dayIndex, hours: formatTime_(startDate) + '–' + formatTime_(endDate), start: formatTime_(startDate), end: formatTime_(endDate), startIso: startDate.toISOString(), endIso: endDate.toISOString(), hoursValue: hoursValue, duration: hoursValue };
 }
 
 function detectWeek_(filename, subject, text, messageDate) {
