@@ -1,5 +1,6 @@
 const CONFIG = {
   appName: 'Harmonogram MOW',
+  backendVersion: '2026-06-21-stored-weeks',
   securityMode: 'token',
   sourceEmail: 'dgorski5@wp.pl',
   calendarId: 'primary',
@@ -232,6 +233,7 @@ function getDashboardData(educator) {
   const changes = [].concat.apply([], weeks.map(function (week) { return week.changes || []; }));
   return {
     appName: CONFIG.appName,
+    backendVersion: CONFIG.backendVersion,
     educator: who,
     calendarEducator: CONFIG.calendarEducator,
     calendarSyncLocked: true,
@@ -1135,6 +1137,7 @@ function clearAllStoredWeeks() {
 }
 
 function jsonOutput_(payload, callback, transport) {
+  payload = repairMojibake_(payload);
   const json = JSON.stringify(payload);
   const mode = String(transport || '').toLowerCase();
   const cb = String(callback || '').trim();
@@ -1152,6 +1155,46 @@ function jsonOutput_(payload, callback, transport) {
   return ContentService
     .createTextOutput(json)
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+function repairMojibake_(value) {
+  if (typeof value === 'string') return repairMojibakeText_(value);
+  if (Array.isArray(value)) return value.map(function (item) { return repairMojibake_(item); });
+  if (value && Object.prototype.toString.call(value) === '[object Date]') return value;
+  if (value && typeof value === 'object') {
+    const copy = {};
+    Object.keys(value).forEach(function (key) { copy[key] = repairMojibake_(value[key]); });
+    return copy;
+  }
+  return value;
+}
+
+function repairMojibakeText_(value) {
+  return String(value)
+    .replace(/\u00C4\u2026/g, '\u0105')
+    .replace(/\u00C4\u2021/g, '\u0107')
+    .replace(/\u00C4\u2122/g, '\u0119')
+    .replace(/\u00C5\u201A/g, '\u0142')
+    .replace(/\u00C5\u201E/g, '\u0144')
+    .replace(/\u00C3\u00B3/g, '\u00F3')
+    .replace(/\u00C5\u203A/g, '\u015B')
+    .replace(/\u00C5\u015F/g, '\u017A')
+    .replace(/\u00C5\u013D/g, '\u017C')
+    .replace(/\u00C4\u201E/g, '\u0104')
+    .replace(/\u00C4\u2020/g, '\u0106')
+    .replace(/\u00C4\u02DC/g, '\u0118')
+    .replace(/\u00C5\u0081/g, '\u0141')
+    .replace(/\u00C5\u0192/g, '\u0143')
+    .replace(/\u00C3\u201C/g, '\u00D3')
+    .replace(/\u00C5\u0161/g, '\u015A')
+    .replace(/\u00C5\u00BB/g, '\u017B')
+    .replace(/\u00C5\u00B9/g, '\u0179')
+    .replace(/\u00E2\u20AC\u201C/g, '\u2013')
+    .replace(/\u00E2\u20AC\u201D/g, '\u2014')
+    .replace(/\u00E2\u2020\u2019/g, '\u2192')
+    .replace(/\u00E2\u20AC\u00A2/g, '\u2022')
+    .replace(/\u00E2\u20AC\u017E/g, '\u201E')
+    .replace(/\u00E2\u20AC\u009D/g, '\u201D');
 }
 
 function bridgeOutput_(payload) {

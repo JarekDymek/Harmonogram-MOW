@@ -287,9 +287,47 @@ function applyPayload(payload) {
 
 function normalizePayload(payload) {
   const source = payload && payload.data && payload.data.weeks ? payload.data : payload;
-  const weeks = (source.weeks || []).map(normalizeWeek);
-  const history = source.history && source.history.length ? source.history : weeks.map(weekToHistoryRow);
-  return { weeks, history, alerts: source.alerts || [], changes: source.changes || collectChangesFromWeeks(weeks), availableEducators: source.availableEducators || [], updatedAt: source.updatedAt || source.generatedAt, educator: source.educator, calendarEducator: source.calendarEducator, security: source.security || {} };
+  const cleanSource = repairMojibake(source || {});
+  const weeks = (cleanSource.weeks || []).map(normalizeWeek);
+  const history = cleanSource.history && cleanSource.history.length ? cleanSource.history : weeks.map(weekToHistoryRow);
+  return { weeks, history, alerts: cleanSource.alerts || [], changes: cleanSource.changes || collectChangesFromWeeks(weeks), availableEducators: cleanSource.availableEducators || [], updatedAt: cleanSource.updatedAt || cleanSource.generatedAt, educator: cleanSource.educator, calendarEducator: cleanSource.calendarEducator, security: cleanSource.security || {} };
+}
+
+function repairMojibake(value) {
+  if (typeof value === 'string') return repairMojibakeText(value);
+  if (Array.isArray(value)) return value.map(repairMojibake);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, repairMojibake(item)]));
+  }
+  return value;
+}
+
+function repairMojibakeText(value = '') {
+  return String(value)
+    .replace(/\u00C4\u2026/g, '\u0105')
+    .replace(/\u00C4\u2021/g, '\u0107')
+    .replace(/\u00C4\u2122/g, '\u0119')
+    .replace(/\u00C5\u201A/g, '\u0142')
+    .replace(/\u00C5\u201E/g, '\u0144')
+    .replace(/\u00C3\u00B3/g, '\u00F3')
+    .replace(/\u00C5\u203A/g, '\u015B')
+    .replace(/\u00C5\u015F/g, '\u017A')
+    .replace(/\u00C5\u013D/g, '\u017C')
+    .replace(/\u00C4\u201E/g, '\u0104')
+    .replace(/\u00C4\u2020/g, '\u0106')
+    .replace(/\u00C4\u02DC/g, '\u0118')
+    .replace(/\u00C5\u0081/g, '\u0141')
+    .replace(/\u00C5\u192/g, '\u0143')
+    .replace(/\u00C3\u201C/g, '\u00D3')
+    .replace(/\u00C5\u0161/g, '\u015A')
+    .replace(/\u00C5\u00BB/g, '\u017B')
+    .replace(/\u00C5\u00B9/g, '\u0179')
+    .replace(/\u00E2\u20AC\u201C/g, '\u2013')
+    .replace(/\u00E2\u20AC\u201D/g, '\u2014')
+    .replace(/\u00E2\u2020\u2019/g, '\u2192')
+    .replace(/\u00E2\u20AC\u00A2/g, '\u2022')
+    .replace(/\u00E2\u20AC\u017E/g, '\u201E')
+    .replace(/\u00E2\u20AC\u009D/g, '\u201D');
 }
 
 function normalizeWeek(week) {
@@ -450,7 +488,9 @@ function renderChangesPanel() {
   const target = $('changesView');
   if (!target) return;
   const active = state.weeks[Math.min(state.activeTab || 0, Math.max((state.weeks || []).length - 1, 0))];
-  const changes = (active && active.changes ? active.changes : []).concat((state.changes || []).filter(ch => active && ch.weekStart === active.weekStart));
+  const activeChanges = active && active.changes ? active.changes : [];
+  const fallbackChanges = (state.changes || []).filter(ch => active && ch.weekStart === active.weekStart);
+  const changes = activeChanges.length ? activeChanges : fallbackChanges;
   const alerts = (state.alerts || []).filter(alert => !active || alert.weekStart === active.weekStart).slice(0, 4);
   if (!changes.length && !alerts.length) { target.innerHTML = ''; return; }
   const changeRows = changes.slice(0, 12).map(ch => `<div class="change-row"><strong>${escapeHtml(ch.dayName || ch.date || 'Zmiana')}</strong><span>${escapeHtml(ch.message || '')}</span>${ch.before || ch.after ? `<small>Było: ${escapeHtml(ch.before || '—')} → Jest: ${escapeHtml(ch.after || '—')}</small>` : ''}</div>`).join('');
