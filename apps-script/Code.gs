@@ -225,8 +225,8 @@ function manualRefresh() {
 function getDashboardData(educator) {
   const who = normalizeEducatorInput_(educator || CONFIG.defaultEducator);
   const currentMonday = mondayOf_(new Date());
-  const weeks = CONFIG.dashboardWeekOffsets.map(function (shiftDays) {
-    const weekStart = toIsoDate_(addDays_(currentMonday, shiftDays));
+  const dashboardWeekStarts = getDashboardWeekStarts_(currentMonday);
+  const weeks = dashboardWeekStarts.map(function (weekStart) {
     return buildWeekView_(weekStart, who);
   });
   const changes = [].concat.apply([], weeks.map(function (week) { return week.changes || []; }));
@@ -239,12 +239,41 @@ function getDashboardData(educator) {
     calendarId: CONFIG.calendarId,
     generatedAt: new Date().toISOString(),
     dashboardWeekOffsets: CONFIG.dashboardWeekOffsets,
+    dashboardWeekStarts: dashboardWeekStarts,
     weeks: weeks,
     history: buildHistory_(who),
     alerts: getAlerts_(),
     changes: changes,
     availableEducators: getAvailableEducators_()
   };
+}
+
+function getDashboardWeekStarts_(currentMonday) {
+  const weekStarts = {};
+  CONFIG.dashboardWeekOffsets.forEach(function (shiftDays) {
+    weekStarts[toIsoDate_(addDays_(currentMonday, shiftDays))] = true;
+  });
+  getStoredWeekStarts_().forEach(function (weekStart) {
+    if (isWeekInDashboardWindow_(weekStart)) weekStarts[weekStart] = true;
+  });
+  return Object.keys(weekStarts).sort();
+}
+
+function getStoredWeekStarts_() {
+  const props = PropertiesService.getScriptProperties().getProperties();
+  return Object.keys(props)
+    .filter(function (key) { return key.indexOf('docs:') === 0; })
+    .map(function (key) { return key.replace('docs:', ''); })
+    .sort();
+}
+
+function isWeekInDashboardWindow_(weekStartIso) {
+  const weekStart = parseIsoDate_(weekStartIso);
+  const weekEnd = addDays_(weekStart, 6);
+  const today = startOfDay_(new Date());
+  const minDate = addDays_(today, -CONFIG.scanPastDays);
+  const maxDate = addDays_(today, CONFIG.scanFutureDays);
+  return weekEnd >= minDate && weekStart <= maxDate;
 }
 
 function scanMailbox_() {
@@ -703,11 +732,7 @@ function buildWeekView_(weekStart, educator) {
 
 function buildHistory_(educator) {
   const who = normalizeEducatorInput_(educator || CONFIG.defaultEducator);
-  const props = PropertiesService.getScriptProperties().getProperties();
-  return Object.keys(props)
-    .filter(function (key) { return key.indexOf('docs:') === 0; })
-    .map(function (key) { return key.replace('docs:', ''); })
-    .sort()
+  return getStoredWeekStarts_()
     .slice(-CONFIG.historyWeeks)
     .map(function (weekStart) {
       const view = buildWeekView_(weekStart, who);
