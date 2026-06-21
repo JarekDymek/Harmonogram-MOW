@@ -444,6 +444,7 @@ function scoreScheduleSource_(source, text) {
   const size = Number(source.size || 0);
   const hasInternat = /\bINTERNAT\b/i.test(text);
   const hasAnyGroup = /\n\s*(?:I|II|III|IV|V|VI|VII|VIII)\s*(?:\n|\s)/i.test(text);
+  const hasVacationGroup = /\n\s*GRUPA\s+[A-Z]\s*(?:\n|\s)/i.test(text);
   const hasGroupVI = /\n\s*VI\s*(?:\n|\s)/i.test(text);
   const hasNight = /\n\s*NOC\s*(?:\n|\s)/i.test(text);
   const isCorrection = combined.indexOf('korekta') !== -1 || combined.indexOf('poprawka') !== -1 || combined.indexOf('zmiana') !== -1;
@@ -453,8 +454,9 @@ function scoreScheduleSource_(source, text) {
   if (looksLikeTeamSchedule && !hasInternat) return { priority: 0, kind: 'team-schedule', reason: 'to jest grafik zespołu, nie grafik internatu' };
   if (isCorrectionGr6 && hasGroupVI) return { priority: 100, kind: 'correction-gr6', reason: 'korekta grafiku Gr 6' };
   if (isCorrection && hasInternat && hasAnyGroup) return { priority: 96, kind: 'correction-internat', reason: 'korekta grafiku internatu' };
+  if (hasInternat && hasVacationGroup) return { priority: hasNight ? 91 : 83, kind: 'internat-vacation', reason: 'wakacyjny grafik internatu' };
   if (hasInternat && hasAnyGroup) return { priority: hasNight ? 90 : 82, kind: 'internat', reason: 'pełny grafik internatu' };
-  if (size >= 35000 && hasAnyGroup) return { priority: 70, kind: 'large-schedule', reason: 'duży plik z grupami' };
+  if (size >= 30000 && (hasAnyGroup || hasVacationGroup)) return { priority: 70, kind: 'large-schedule', reason: 'duży plik z grupami' };
   return { priority: 0, kind: 'unknown', reason: 'plik nie wygląda jak grafik internatu' };
 }
 
@@ -562,6 +564,7 @@ function parseInternatSchedule_(text, weekStartIso, educator) {
   const who = normalizeEducatorInput_(educator || CONFIG.defaultEducator);
   const normalized = normalizeText_(text);
   const groupBlocks = extractGroupBlocks_(normalized);
+  const vacationGroupBlocks = extractVacationGroupBlocks_(normalized);
   const days = makeEmptyDays_(weekStartIso);
 
   Object.keys(groupBlocks).forEach(function (groupName) {
@@ -584,12 +587,33 @@ function parseInternatSchedule_(text, weekStartIso, educator) {
     });
   });
 
+  Object.keys(vacationGroupBlocks).forEach(function (groupName) {
+    const block = vacationGroupBlocks[groupName];
+    const tokens = extractShiftTokens_(block);
+    const assigned = enrichTokensWithReliefInfo_(assignTokensToDays_(tokens));
+
+    assigned.forEach(function (item) {
+      if (!isSelectedEducator_(item.name, who)) return;
+      const day = days[item.dayIndex];
+      if (!day) return;
+      const shift = buildShift_(weekStartIso, item.dayIndex, item.start, item.end, 'wakacje', 'Grupa ' + groupName);
+      shift.personRaw = item.name;
+      shift.replacesPerson = cleanReliefName_(item.replacesPerson || '');
+      shift.replacedByPerson = cleanReliefName_(item.replacedByPerson || '');
+      shift.zmieniam = shift.replacesPerson;
+      shift.zmienia = shift.replacedByPerson;
+      day.shifts.push(shift);
+    });
+  });
+
   const nightBlock = extractNightBlock_(normalized);
   if (nightBlock) {
-    const nightTokens = extractShiftTokens_(nightBlock);
+    const nightTokens = Object.keys(vacationGroupBlocks).length
+      ? extractVacationNightTokens_(nightBlock)
+      : extractShiftTokens_(nightBlock);
     nightTokens.forEach(function (item, index) {
       if (!isSelectedEducator_(item.name, who)) return;
-      const dayIndex = Math.min(index, 6);
+      const dayIndex = typeof item.dayIndex === 'number' ? item.dayIndex : Math.min(index, 6);
       const day = days[dayIndex];
       if (!day) return;
       const shift = buildShift_(weekStartIso, dayIndex, item.start, item.end, 'noc', 'Noc');
@@ -611,6 +635,48 @@ function parseInternatSchedule_(text, weekStartIso, educator) {
   });
 
   return { days: days, totalHours: round2_(days.reduce(function (sum, day) { return sum + day.hoursDay; }, 0)) };
+}
+
+function extractVacationGroupBlocks_(text) {
+  const markers = [];
+  const re = /(?:^|\n)\s*GRUPA\s+([A-Z])\s*(?:\n|\s)/gi;
+  let match;
+  while ((match = re.exec(text)) !== null) {
+    markers.push({ name: match[1].toUpperCase(), index: match.index });
+  }
+  markers.sort(function (a, b) { return a.index - b.index; });
+  const result = {};
+  markers.forEach(function (marker, index) {
+    const start = marker.index;
+    let end = index + 1 < markers.length ? markers[index + 1].index : text.length;
+    const nightMatch = /\n\s*NOC\s*(?:\n|\s)/i.exec(text.slice(start));
+    if (nightMatch) {
+      const nightIndex = start + nightMatch.index;
+      if (nightIndex > start && nightIndex < end) end = nightIndex;
+    }
+    result[marker.name] = text.slice(start, end);
+  });
+  return result;
+}
+
+function extractVacationNightTokens_(nightBlock) {
+  const lines = normalizeText_(nightBlock).split('\n').map(function (line) { return line.trim(); }).filter(Boolean);
+  const tokens = [];
+  let dayIndex = -1;
+  lines.forEach(function (line) {
+    if (/^NOC$/i.test(line)) return;
+    if (/urlop/i.test(line)) return;
+    const lineTokens = extractShiftTokens_(line);
+    if (!lineTokens.length) return;
+    dayIndex++;
+    lineTokens.forEach(function (token) {
+      tokens.push({ start: token.start, end: token.end, name: token.name, dayIndex: Math.min(dayIndex, 6) });
+    });
+  });
+  if (tokens.length) return tokens;
+  return extractShiftTokens_(nightBlock).map(function (token, index) {
+    return { start: token.start, end: token.end, name: token.name, dayIndex: Math.min(index, 6) };
+  });
 }
 
 function enrichTokensWithReliefInfo_(assigned) {
