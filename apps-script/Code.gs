@@ -802,13 +802,21 @@ function extractVacationNightTokens_(nightBlock) {
     if (!lineTokens.length) return;
     dayIndex++;
     lineTokens.forEach(function (token) {
-      tokens.push({ start: token.start, end: token.end, name: token.name, dayIndex: Math.min(dayIndex, 6) });
+      tokens.push({ start: token.start, end: token.end, name: token.name, dayIndex: getVacationNightFallbackDayIndex_(token, dayIndex) });
     });
   });
   if (tokens.length) return tokens;
   return extractShiftTokens_(nightBlock).map(function (token, index) {
-    return { start: token.start, end: token.end, name: token.name, dayIndex: Math.min(index, 6) };
+    return { start: token.start, end: token.end, name: token.name, dayIndex: getVacationNightFallbackDayIndex_(token, index) };
   });
+}
+
+function getVacationNightFallbackDayIndex_(token, dayIndex) {
+  const startHour = Number(token && token.start ? token.start.hour : 0);
+  const endHour = Number(token && token.end ? token.end.hour : 0);
+  const crossesMidnight = startHour >= 20 && endHour <= 8;
+  const adjusted = crossesMidnight && dayIndex > 0 ? dayIndex - 1 : dayIndex;
+  return Math.max(0, Math.min(adjusted, 6));
 }
 
 function enrichTokensWithReliefInfo_(assigned) {
