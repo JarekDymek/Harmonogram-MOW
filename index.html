@@ -85,37 +85,50 @@
       <p class="hint"><strong>Kalendarz Google jest zablokowany tylko dla Dymka.</strong> Zmiana nazwiska zmienia widok w aplikacji, ale nie dopisuje planów innych wychowawców do Twojego Kalendarza Google.</p>
     </section>
 
-    <section id="securityNotice"></section>
-    <section id="backendDiagnostics"></section>
-    <section id="alertsView"></section>
-    <section id="todayView"></section>
-    <section id="changesView"></section>
+    <details class="panel-card" open>
+      <summary>Plan tygodnia</summary>
+      <nav id="weekTabs" class="tabs" aria-label="Zakładki tygodni"></nav>
+      <section class="card week-tools" aria-label="Narzędzia tygodnia">
+        <label>
+          Widok dni
+          <select id="dayFilter">
+            <option value="all">Wszystkie dni</option>
+            <option value="work">Tylko dni pracy</option>
+            <option value="changed">Tylko dni ze zmianami</option>
+            <option value="warnings">Tylko ostrzeżenia</option>
+          </select>
+        </label>
+        <button id="printBtn" class="secondary" type="button">Druk / PDF</button>
+        <button id="shareViewBtn" class="secondary" type="button">Link do podglądu</button>
+      </section>
+      <section id="weekView"></section>
+    </details>
 
-    <nav id="weekTabs" class="tabs" aria-label="Zakładki tygodni"></nav>
-    <section class="card week-tools" aria-label="Narzędzia tygodnia">
-      <label>
-        Widok dni
-        <select id="dayFilter">
-          <option value="all">Wszystkie dni</option>
-          <option value="work">Tylko dni pracy</option>
-          <option value="changed">Tylko dni ze zmianami</option>
-          <option value="warnings">Tylko ostrzeżenia</option>
-        </select>
-      </label>
-      <button id="printBtn" class="secondary" type="button">Druk / PDF</button>
-      <button id="shareViewBtn" class="secondary" type="button">Link do podglądu</button>
-    </section>
-    <section id="weekView"></section>
+    <details class="panel-card">
+      <summary>Komunikaty i zmiany</summary>
+      <section id="securityNotice"></section>
+      <section id="backendDiagnostics"></section>
+      <section id="alertsView"></section>
+      <section id="changesView"></section>
+    </details>
 
-    <section class="card history-card">
-      <div class="section-title">
-        <h2>Historia godzin</h2>
-        <div class="row-actions history-actions">
-          <button id="exportBtn" class="secondary" type="button">Eksport CSV</button>
+    <details class="panel-card">
+      <summary>Dzisiaj i najbliższy dyżur</summary>
+      <section id="todayView"></section>
+    </details>
+
+    <details class="panel-card">
+      <summary>Historia godzin</summary>
+      <section class="card history-card">
+        <div class="section-title">
+          <h2>Historia godzin</h2>
+          <div class="row-actions history-actions">
+            <button id="exportBtn" class="secondary" type="button">Eksport CSV</button>
+          </div>
         </div>
-      </div>
-      <div id="historyView"></div>
-    </section>
+        <div id="historyView"></div>
+      </section>
+    </details>
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>

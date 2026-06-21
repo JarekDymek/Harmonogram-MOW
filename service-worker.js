@@ -1,4 +1,4 @@
-const CACHE = 'harmonogram-mow-v12-full-improvements-20260621-encoding-fix';
+const CACHE = 'harmonogram-mow-v12-full-improvements-20260621-week-ui';
 const ASSETS = ['./', './index.html', './assets/styles.css', './assets/app.js', './assets/icon.svg', './manifest.webmanifest', './data/sample-weeks.json', './backend-test.html'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)));

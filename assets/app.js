@@ -17,12 +17,17 @@ const DEFAULT_STATE = {
   seenAlertIds: [],
   lastSync: null,
   activeTab: 1,
+  weekTabOffset: 0,
   backendError: ''
 };
 
 const $ = (id) => document.getElementById(id);
 let deferredInstallPrompt = null;
 let state = loadState();
+if (state.weeks && state.weeks.length) {
+  state.activeTab = getPreferredWeekIndex(state.weeks);
+  state.weekTabOffset = getWeekTabOffsetForActive(state.activeTab, state.weeks.length);
+}
 
 window.addEventListener('beforeinstallprompt', (event) => {
   event.preventDefault();
@@ -73,6 +78,8 @@ function loadState() {
       if (!raw) continue;
       const parsed = JSON.parse(raw) || {};
       const merged = { ...DEFAULT_STATE, ...parsed };
+      if (Array.isArray(merged.weeks)) merged.weeks = merged.weeks.sort(compareWeekLikeAsc);
+      if (Array.isArray(merged.history)) merged.history = sortHistoryRows(merged.history);
       if (key !== STORAGE_KEY) localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
       return merged;
     } catch {}
@@ -276,6 +283,8 @@ function applyPayload(payload) {
   state.educator = normalized.educator || state.educator || 'Dymek';
   state.calendarEducator = normalized.calendarEducator || state.calendarEducator || 'Dymek';
   state.security = normalized.security || state.security || {};
+  state.activeTab = getPreferredWeekIndex(state.weeks);
+  state.weekTabOffset = getWeekTabOffsetForActive(state.activeTab, state.weeks.length);
   if (newAlerts.length) {
     notifyAlerts(newAlerts);
     state.seenAlertIds = Array.from(new Set([...(state.seenAlertIds || []), ...newAlerts.map(a => a.id)])).slice(-100);
@@ -288,8 +297,8 @@ function applyPayload(payload) {
 function normalizePayload(payload) {
   const source = payload && payload.data && payload.data.weeks ? payload.data : payload;
   const cleanSource = repairMojibake(source || {});
-  const weeks = (cleanSource.weeks || []).map(normalizeWeek);
-  const history = cleanSource.history && cleanSource.history.length ? cleanSource.history : weeks.map(weekToHistoryRow);
+  const weeks = (cleanSource.weeks || []).map(normalizeWeek).sort(compareWeekLikeAsc);
+  const history = sortHistoryRows(cleanSource.history && cleanSource.history.length ? cleanSource.history : weeks.map(weekToHistoryRow));
   return { weeks, history, alerts: cleanSource.alerts || [], changes: cleanSource.changes || collectChangesFromWeeks(weeks), availableEducators: cleanSource.availableEducators || [], updatedAt: cleanSource.updatedAt || cleanSource.generatedAt, educator: cleanSource.educator, calendarEducator: cleanSource.calendarEducator, security: cleanSource.security || {} };
 }
 
@@ -418,9 +427,88 @@ function renderAlerts() {
 }
 
 function renderTabs() {
-  const labels = ['Poprzedni', 'Bieżący', 'Następny'];
-  $('weekTabs').innerHTML = state.weeks.slice(0, 3).map((week, index) => `<button class="tab ${index === state.activeTab ? 'active' : ''}" type="button" data-index="${index}">${labels[index] || week.label || 'Tydzień'}<small>${escapeHtml(week.range || `${week.dateFrom} – ${week.dateTo}`)}</small></button>`).join('');
-  document.querySelectorAll('.tab').forEach(btn => btn.addEventListener('click', () => { state.activeTab = Number(btn.dataset.index); persist(); render(); }));
+  const target = $('weekTabs');
+  if (!target) return;
+  const weeks = state.weeks || [];
+  if (!weeks.length) {
+    target.innerHTML = '';
+    return;
+  }
+  const visibleCount = Math.min(3, weeks.length);
+  const maxOffset = Math.max(0, weeks.length - visibleCount);
+  state.weekTabOffset = Math.min(Math.max(Number(state.weekTabOffset || 0), 0), maxOffset);
+  if (state.activeTab < state.weekTabOffset || state.activeTab >= state.weekTabOffset + visibleCount) {
+    state.weekTabOffset = getWeekTabOffsetForActive(state.activeTab, weeks.length);
+  }
+  const visibleWeeks = weeks.slice(state.weekTabOffset, state.weekTabOffset + visibleCount);
+  target.innerHTML = `
+    <button class="tab-arrow" type="button" data-week-nav="-1" aria-label="Poprzedni tydzień" ${state.activeTab <= 0 ? 'disabled' : ''}>‹</button>
+    <div class="tab-strip">
+      ${visibleWeeks.map((week, visibleIndex) => {
+        const index = state.weekTabOffset + visibleIndex;
+        const relation = getWeekRelationLabel(week, index);
+        return `<button class="tab ${index === state.activeTab ? 'active' : ''}" type="button" data-index="${index}">${escapeHtml(relation)}<small>${escapeHtml(week.range || `${week.dateFrom} – ${week.dateTo}`)}</small></button>`;
+      }).join('')}
+    </div>
+    <button class="tab-arrow" type="button" data-week-nav="1" aria-label="Następny tydzień" ${state.activeTab >= weeks.length - 1 ? 'disabled' : ''}>›</button>
+  `;
+  target.querySelectorAll('.tab').forEach(btn => btn.addEventListener('click', () => {
+    state.activeTab = Number(btn.dataset.index);
+    state.weekTabOffset = getWeekTabOffsetForActive(state.activeTab, weeks.length);
+    persist();
+    render();
+  }));
+  target.querySelectorAll('[data-week-nav]').forEach(btn => btn.addEventListener('click', () => {
+    const step = Number(btn.dataset.weekNav || 0);
+    state.activeTab = Math.min(Math.max(Number(state.activeTab || 0) + step, 0), weeks.length - 1);
+    state.weekTabOffset = getWeekTabOffsetForActive(state.activeTab, weeks.length);
+    persist();
+    render();
+  }));
+}
+
+function getPreferredWeekIndex(weeks = []) {
+  if (!weeks.length) return 0;
+  const today = startOfLocalDay(new Date());
+  const currentIndex = weeks.findIndex(week => {
+    const range = getWeekDateRange(week);
+    return range.start && range.end && range.start <= today && range.end >= today;
+  });
+  if (currentIndex >= 0) return currentIndex;
+  const nextIndex = weeks.findIndex(week => {
+    const range = getWeekDateRange(week);
+    return range.start && range.start > today;
+  });
+  return nextIndex >= 0 ? nextIndex : weeks.length - 1;
+}
+
+function getWeekTabOffsetForActive(activeIndex, totalWeeks) {
+  const visibleCount = Math.min(3, totalWeeks || 0);
+  if (!visibleCount) return 0;
+  const maxOffset = Math.max(0, totalWeeks - visibleCount);
+  return Math.min(Math.max(Number(activeIndex || 0) - 1, 0), maxOffset);
+}
+
+function getWeekRelationLabel(week, index) {
+  const range = getWeekDateRange(week);
+  const today = startOfLocalDay(new Date());
+  if (range.start && range.end && range.start <= today && range.end >= today) return 'Bieżący';
+  if (range.end && range.end < today) {
+    const lastPastIndex = (state.weeks || []).reduce((found, item, itemIndex) => {
+      const itemRange = getWeekDateRange(item);
+      return itemRange.end && itemRange.end < today ? itemIndex : found;
+    }, -1);
+    return index === lastPastIndex ? 'Poprzedni' : (week.label || 'Archiwalny');
+  }
+  const futureWeeks = (state.weeks || []).filter(item => {
+    const itemRange = getWeekDateRange(item);
+    return itemRange.start && itemRange.start > today;
+  });
+  const futureIndex = futureWeeks.findIndex(item => item === week);
+  if (futureIndex === 0) return 'Następny';
+  if (futureIndex === 1) return 'Kolejny';
+  if (futureIndex > 1) return `Za ${futureIndex + 1} tyg.`;
+  return week.label || 'Tydzień';
 }
 
 function renderWeek() {
@@ -550,6 +638,47 @@ async function copyShareSummary() {
 
 const DAYS = [{ key: 'mon', name: 'PON' }, { key: 'tue', name: 'WT' }, { key: 'wed', name: 'ŚR' }, { key: 'thu', name: 'CZW' }, { key: 'fri', name: 'PT' }, { key: 'sat', name: 'SOB' }, { key: 'sun', name: 'ND' }];
 function weekToHistoryRow(week) { return { range: week.range, dateFrom: week.dateFrom, dateTo: week.dateTo, ...(week.summary || {}) }; }
+function sortHistoryRows(rows = []) { return [...rows].sort((a, b) => compareWeekLikeAsc(b, a)); }
+function compareWeekLikeAsc(a, b) {
+  const ar = getWeekDateRange(a);
+  const br = getWeekDateRange(b);
+  if (ar.start && br.start) return ar.start - br.start;
+  return String(a?.range || a?.dateFrom || a?.weekStart || '').localeCompare(String(b?.range || b?.dateFrom || b?.weekStart || ''), 'pl');
+}
+function getWeekDateRange(week = {}) {
+  const start = parseLocalDate(week.dateFrom || week.weekStart) || parseFirstDateFromRange(week.range);
+  const end = parseLocalDate(week.dateTo || week.weekEnd) || parseLastDateFromRange(week.range, start);
+  return { start: start ? startOfLocalDay(start) : null, end: end ? startOfLocalDay(end) : null };
+}
+function parseFirstDateFromRange(range = '') {
+  const dates = parseDatesFromText(range);
+  return dates[0] || null;
+}
+function parseLastDateFromRange(range = '', firstDate = null) {
+  const dates = parseDatesFromText(range, firstDate?.getFullYear());
+  if (!dates.length) return null;
+  const last = dates[dates.length - 1];
+  if (firstDate && last < firstDate) last.setFullYear(firstDate.getFullYear() + 1);
+  return last;
+}
+function parseDatesFromText(text = '', fallbackYear = new Date().getFullYear()) {
+  return [...String(text || '').matchAll(/(\d{1,2})[.\-/](\d{1,2})(?:[.\-/](\d{2,4}))?/g)]
+    .map(match => parseLocalDate(match[0], fallbackYear))
+    .filter(Boolean);
+}
+function parseLocalDate(value = '', fallbackYear = new Date().getFullYear()) {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  const iso = text.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+  const dotted = text.match(/(\d{1,2})[.\-/](\d{1,2})(?:[.\-/](\d{2,4}))?/);
+  if (!dotted) return null;
+  const rawYear = dotted[3] ? Number(dotted[3]) : fallbackYear;
+  const year = rawYear < 100 ? 2000 + rawYear : rawYear;
+  const date = new Date(year, Number(dotted[2]) - 1, Number(dotted[1]));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+function startOfLocalDay(date) { return new Date(date.getFullYear(), date.getMonth(), date.getDate()); }
 function parseHoursLabel(label) { const match = String(label).match(/(\d{1,2}:\d{2})\s*[–-]\s*(\d{1,2}:\d{2})/); if (!match) return { hours: label, start: '', end: '', duration: 0 }; const duration = durationHours(match[1], match[2]); return { hours: `${match[1]}–${match[2]}`, start: match[1], end: match[2], duration }; }
 function durationHours(start, end) { const [sh, sm] = start.split(':').map(Number); const [eh, em] = end.split(':').map(Number); let minutes = (eh * 60 + em) - (sh * 60 + sm); if (minutes <= 0) minutes += 24 * 60; return round(minutes / 60); }
 function addDaysIso(iso, offset) { const date = new Date(`${iso}T00:00:00`); date.setDate(date.getDate() + offset); return date.toISOString().slice(0, 10); }

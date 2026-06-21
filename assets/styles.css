@@ -84,7 +84,46 @@ input, select {
 }
 .row-actions { display: grid; gap: 10px; }
 .hint, .empty { color: var(--muted); line-height: 1.45; font-weight: 760; overflow-wrap: anywhere; }
-.tabs { display: grid; grid-template-columns: 1fr; gap: 10px; margin: 14px 0; }
+.panel-card {
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0;
+  margin: 14px 0;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.panel-card > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 58px;
+  padding: 16px var(--pad);
+  cursor: pointer;
+  font-size: clamp(20px, 4.4vw, 30px);
+  font-weight: 950;
+  color: var(--text);
+  background: #f7f7f7;
+  list-style: none;
+}
+.panel-card > summary::-webkit-details-marker { display: none; }
+.panel-card > summary::after {
+  content: "Rozwiń";
+  font-size: .82rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.panel-card[open] > summary::after { content: "Zwiń"; }
+.panel-card > :not(summary) { margin-left: var(--pad); margin-right: var(--pad); }
+.tabs {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 8px;
+  margin: 14px 0;
+}
+.tab-strip { display: grid; grid-template-columns: 1fr; gap: 10px; min-width: 0; }
 .tab {
   text-align: left;
   border: 3px solid transparent;
@@ -94,6 +133,20 @@ input, select {
 }
 .tab.active { background: #050505; color: #fff; border-color: #050505; }
 .tab small { display: block; margin-top: 5px; font-size: .86rem; opacity: .84; }
+.tab-arrow {
+  width: 54px;
+  min-width: 54px;
+  padding: 0;
+  border: 3px solid #050505;
+  background: #fff;
+  color: #050505;
+  font-size: 2rem;
+  line-height: 1;
+}
+.tab-arrow:disabled {
+  opacity: .35;
+  cursor: default;
+}
 .week-head { display: grid; gap: 14px; }
 .metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .metric { background: #f0f0f0; border-radius: 18px; padding: 14px; border: 2px solid #e1e1e1; }
@@ -170,7 +223,7 @@ input, select {
 @media (min-width: 560px) {
   .toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .row-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tab-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 @media (min-width: 760px) {
@@ -186,7 +239,7 @@ input, select {
 }
 html[data-layout="phone"] .app-main { max-width: 520px; }
 html[data-layout="phone"] .toolbar,
-html[data-layout="phone"] .tabs,
+html[data-layout="phone"] .tab-strip,
 html[data-layout="phone"] .days,
 html[data-layout="phone"] .settings-grid { grid-template-columns: 1fr !important; }
 html[data-layout="tablet"] .app-main { max-width: 920px; }
