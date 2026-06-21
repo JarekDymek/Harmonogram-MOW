@@ -403,7 +403,8 @@ function parseDocxAttachmentToScheduleDocument_(blob, source) {
   Logger.log('Konwertuję DOCX przez Drive + DocumentApp: ' + source.filename);
   const temp = Drive.Files.insert({ title: '[TMP] Harmonogram MOW - ' + source.filename, mimeType: MimeType.GOOGLE_DOCS }, blob, { convert: true });
   try {
-    const text = DocumentApp.openById(temp.id).getBody().getText();
+    const body = DocumentApp.openById(temp.id).getBody();
+    const text = body.getText() + '\n' + extractTablesAsMarkedText_(body);
     const normalized = normalizeText_(text);
     const sourceScore = scoreScheduleSource_(source, normalized);
     if (sourceScore.priority <= 0) return { ignored: true, reason: sourceScore.reason };
@@ -435,6 +436,25 @@ function parseDocxAttachmentToScheduleDocument_(blob, source) {
   } finally {
     try { Drive.Files.trash(temp.id); } catch (err) { Logger.log('Nie udało się usunąć pliku tymczasowego: ' + err.message); }
   }
+}
+
+function extractTablesAsMarkedText_(body) {
+  const output = [];
+  for (let childIndex = 0; childIndex < body.getNumChildren(); childIndex++) {
+    const child = body.getChild(childIndex);
+    if (!child || child.getType() !== DocumentApp.ElementType.TABLE) continue;
+    const table = child.asTable();
+    for (let rowIndex = 0; rowIndex < table.getNumRows(); rowIndex++) {
+      const row = table.getRow(rowIndex);
+      const cells = [];
+      for (let cellIndex = 0; cellIndex < row.getNumCells(); cellIndex++) {
+        const cellText = normalizeText_(row.getCell(cellIndex).getText()).replace(/\n+/g, ' ').trim();
+        cells.push('__CELL_' + cellIndex + '__ ' + cellText);
+      }
+      output.push('__TABLE_ROW__ ' + cells.join('\n'));
+    }
+  }
+  return output.join('\n');
 }
 
 function scoreScheduleSource_(source, text) {
@@ -566,6 +586,7 @@ function parseInternatSchedule_(text, weekStartIso, educator) {
   const groupBlocks = extractGroupBlocks_(normalized);
   const vacationGroupBlocks = extractVacationGroupBlocks_(normalized);
   const days = makeEmptyDays_(weekStartIso);
+  const usedMarkedVacationTable = parseMarkedVacationTable_(normalized, weekStartIso, who, days);
 
   Object.keys(groupBlocks).forEach(function (groupName) {
     const groupLabel = 'Gr. ' + groupName;
@@ -587,7 +608,7 @@ function parseInternatSchedule_(text, weekStartIso, educator) {
     });
   });
 
-  Object.keys(vacationGroupBlocks).forEach(function (groupName) {
+  if (!usedMarkedVacationTable) Object.keys(vacationGroupBlocks).forEach(function (groupName) {
     const block = vacationGroupBlocks[groupName];
     const tokens = extractShiftTokens_(block);
     const assigned = enrichTokensWithReliefInfo_(assignTokensToDays_(tokens));
@@ -607,7 +628,7 @@ function parseInternatSchedule_(text, weekStartIso, educator) {
   });
 
   const nightBlock = extractNightBlock_(normalized);
-  if (nightBlock) {
+  if (nightBlock && !usedMarkedVacationTable) {
     const nightTokens = Object.keys(vacationGroupBlocks).length
       ? extractVacationNightTokens_(nightBlock)
       : extractShiftTokens_(nightBlock);
@@ -635,6 +656,61 @@ function parseInternatSchedule_(text, weekStartIso, educator) {
   });
 
   return { days: days, totalHours: round2_(days.reduce(function (sum, day) { return sum + day.hoursDay; }, 0)) };
+}
+
+function parseMarkedVacationTable_(text, weekStartIso, educator, days) {
+  if (String(text || '').indexOf('__TABLE_ROW__') === -1) return false;
+  const rows = String(text || '').split('__TABLE_ROW__').slice(1);
+  let added = 0;
+
+  rows.forEach(function (rowText) {
+    const cells = extractMarkedCells_(rowText);
+    const rowLabel = normalizeName_(cells[0] || '');
+    const isNightRow = rowLabel === 'noc';
+    const groupMatch = rowLabel.match(/^grupa\s+([a-z])$/);
+    if (!isNightRow && !groupMatch) return;
+
+    for (let cellIndex = 1; cellIndex <= 7; cellIndex++) {
+      const dayIndex = cellIndex - 1;
+      const cellText = cells[cellIndex] || '';
+      const tokens = extractShiftTokens_(cellText);
+      const assigned = isNightRow ? tokens : enrichTokensWithReliefInfo_(tokens.map(function (token) {
+        return { dayIndex: dayIndex, start: token.start, end: token.end, name: token.name };
+      }));
+
+      assigned.forEach(function (item) {
+        if (!isSelectedEducator_(item.name, educator)) return;
+        const shift = buildShift_(
+          weekStartIso,
+          dayIndex,
+          item.start,
+          item.end,
+          isNightRow ? 'noc' : 'wakacje',
+          isNightRow ? 'Noc' : 'Grupa ' + groupMatch[1].toUpperCase()
+        );
+        shift.personRaw = item.name;
+        shift.replacesPerson = isNightRow ? '' : cleanReliefName_(item.replacesPerson || '');
+        shift.replacedByPerson = isNightRow ? '' : cleanReliefName_(item.replacedByPerson || '');
+        shift.zmieniam = shift.replacesPerson;
+        shift.zmienia = shift.replacedByPerson;
+        if (isNightRow) addShiftToDays_(days, shift);
+        else days[dayIndex].shifts.push(shift);
+        added++;
+      });
+    }
+  });
+
+  return added > 0;
+}
+
+function extractMarkedCells_(rowText) {
+  const cells = {};
+  const re = /__CELL_(\d+)__\s*([\s\S]*?)(?=__CELL_\d+__|$)/g;
+  let match;
+  while ((match = re.exec(rowText || '')) !== null) {
+    cells[Number(match[1])] = String(match[2] || '').trim();
+  }
+  return cells;
 }
 
 function addShiftToDays_(days, shift) {
