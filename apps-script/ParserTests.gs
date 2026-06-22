@@ -40,6 +40,14 @@ function runParserTests() {
   assertEqual_(parsedDymek.days[5].shifts[0].replacesPerson, 'Kowalska', 'Dymek SOB zmieniam');
 
   const parsedKowalska = parseInternatSchedule_(sample, '2026-06-08', 'Kowalska');
+  const nightDays = makeEmptyDays_('2026-06-29');
+  addShiftToDays_(nightDays, buildShift_('2026-06-29', 2, parseTimeToken_('22:00'), parseTimeToken_('06:00'), 'noc', 'Noc'));
+  const calendarParts = getCalendarShiftsForWeek_({ days: nightDays });
+  assertEqual_(calendarParts.length, 2, 'night calendar parts');
+  assertEqual_(calendarParts[0].start, '22:00', 'night first start');
+  assertEqual_(calendarParts[0].end, '24:00', 'night first end');
+  assertEqual_(calendarParts[1].start, '00:00', 'night second start');
+  assertEqual_(calendarParts[1].end, '06:00', 'night second end');
   assertEqual_(parsedKowalska.days[1].hoursDay, 6, 'Kowalska WT hours');
   assertEqual_(parsedKowalska.days[2].hoursDay, 3, 'Kowalska ŚR hours');
   assertEqual_(parsedKowalska.days[4].hoursDay, 8, 'Kowalska PT hours');

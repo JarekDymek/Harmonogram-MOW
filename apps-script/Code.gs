@@ -15,6 +15,9 @@ const CONFIG = {
   maxAlerts: 30,
   scanPastDays: 21,
   scanFutureDays: 35,
+  infoCalendarLookbackDays: 60,
+  infoCalendarLookaheadDays: 240,
+  infoCalendarMaxThreads: 30,
   dashboardWeekOffsets: [-7, 0, 7, 14],
   triggerMinutes: 30,
   aliases: {
@@ -37,7 +40,7 @@ function doGet(e) {
   const callback = params.callback || '';
   const transport = String(params.transport || params.format || '').toLowerCase();
   const educator = normalizeEducatorInput_(params.educator || CONFIG.defaultEducator);
-  const adminActions = { sync: true, scan: true, forceRescan: true, clearAllStoredWeeks: true };
+  const adminActions = { sync: true, scan: true, forceRescan: true, clearAllStoredWeeks: true, syncInfoCalendar: true };
   const requiredLevel = adminActions[action] ? 'admin' : 'view';
   const access = requireAccess_(params, requiredLevel);
 
@@ -69,6 +72,12 @@ function doGet(e) {
       const scanResult = forceRescan();
       const dashboard = getDashboardData(educator);
       return jsonOutput_(backendResponse_(dashboard, scanResult, { action: 'forceRescan', access: access }), callback, transport);
+    }
+
+    if (action === 'syncInfoCalendar') {
+      const scanResult = { currentInfoCalendar: syncDirectorInfoToCalendar_() };
+      const dashboard = getDashboardData(educator);
+      return jsonOutput_(backendResponse_(dashboard, scanResult, { action: 'syncInfoCalendar', access: access }), callback, transport);
     }
 
     if (action === 'dashboard') {
@@ -215,6 +224,12 @@ function scanAndSync() {
   scanResult.changedWeeks.forEach(function (weekStart) {
     syncWeekToCalendar_(weekStart);
   });
+  try {
+    scanResult.currentInfoCalendar = syncDirectorInfoToCalendar_();
+  } catch (err) {
+    scanResult.currentInfoCalendarError = err.message;
+    Logger.log('BĹ‚Ä…d synchronizacji terminĂłw z wiadomoĹ›ci dyrektora: ' + err.message);
+  }
   return scanResult;
 }
 
@@ -1060,6 +1075,276 @@ function simplifyEducatorName_(name) {
   return parts[parts.length - 1] || cleaned;
 }
 
+function syncDirectorInfoToCalendar_() {
+  const query = ['from:' + CONFIG.sourceEmail, 'newer_than:' + CONFIG.infoCalendarLookbackDays + 'd'].join(' ');
+  const threads = GmailApp.search(query, 0, CONFIG.infoCalendarMaxThreads);
+  const minDate = addDays_(startOfDay_(new Date()), -7);
+  const maxDate = addDays_(startOfDay_(new Date()), CONFIG.infoCalendarLookaheadDays);
+  const existingKeys = getExistingDirectorInfoCalendarKeys_(minDate, maxDate);
+  const props = PropertiesService.getScriptProperties();
+  let scanned = 0;
+  let candidates = 0;
+  let inserted = 0;
+  let skipped = 0;
+
+  threads.forEach(function (thread) {
+    thread.getMessages().forEach(function (message) {
+      scanned++;
+      const subject = String(message.getSubject() || '');
+      const body = String(message.getPlainBody() || '');
+      const sourceText = normalizeText_(subject + '\n' + body).slice(0, 20000);
+      if (isScheduleInfoCalendarText_(sourceText)) return;
+
+      extractDirectorInfoEvents_(sourceText, subject, message.getDate()).forEach(function (item) {
+        candidates++;
+        if (item.start < minDate || item.start > maxDate) {
+          skipped++;
+          return;
+        }
+        const messageId = typeof message.getId === 'function' ? message.getId() : String(message.getDate().getTime());
+        const key = sha256_([messageId, item.title, item.startIso, item.endIso || item.dateEndIso].join('|')).slice(0, 24);
+        if (existingKeys[key] || props.getProperty('infoCalendar:' + key)) {
+          skipped++;
+          return;
+        }
+        Calendar.Events.insert(buildDirectorInfoCalendarEvent_(item, key, subject), CONFIG.calendarId);
+        props.setProperty('infoCalendar:' + key, new Date().toISOString());
+        inserted++;
+      });
+    });
+  });
+
+  Logger.log('Terminy z wiadomoĹ›ci dyrektora: scanned=' + scanned + ', candidates=' + candidates + ', inserted=' + inserted + ', skipped=' + skipped);
+  return { ok: true, scanned: scanned, candidates: candidates, inserted: inserted, skipped: skipped };
+}
+
+function getExistingDirectorInfoCalendarKeys_(minDate, maxDate) {
+  const existing = Calendar.Events.list(CONFIG.calendarId, {
+    timeMin: minDate.toISOString(),
+    timeMax: maxDate.toISOString(),
+    singleEvents: true,
+    q: 'MOW_INFO_EVENT=1'
+  });
+  const keys = {};
+  (existing.items || []).forEach(function (event) {
+    const match = String(event.description || '').match(/MOW_INFO_KEY=([a-f0-9]+)/i);
+    if (match) keys[match[1]] = true;
+  });
+  return keys;
+}
+
+function isScheduleInfoCalendarText_(text) {
+  const normalized = normalizeName_(text);
+  return (normalized.indexOf('harmonogram') !== -1 || normalized.indexOf('grafik') !== -1)
+    && (normalized.indexOf('dyzur') !== -1 || normalized.indexOf('internat') !== -1);
+}
+
+function extractDirectorInfoEvents_(text, subject, messageDate) {
+  const events = [];
+  const seen = {};
+  const source = String(text || '');
+  const numericDate = /\b(\d{1,2})[.\-/](\d{1,2})(?:[.\-/](20\d{2}))?\b/g;
+  const monthDate = /\b(\d{1,2})\s+(stycznia|lutego|marca|kwietnia|maja|czerwca|lipca|sierpnia|wrze[sś]nia|pa[zź]dziernika|listopada|grudnia)(?:\s+(20\d{2}))?/gi;
+
+  collectDirectorInfoDateMatches_(source, numericDate, function (match) {
+    return {
+      day: Number(match[1]),
+      month: Number(match[2]),
+      year: match[3] ? Number(match[3]) : inferInfoCalendarYear_(Number(match[2]), Number(match[1]), messageDate)
+    };
+  }).concat(collectDirectorInfoDateMatches_(source, monthDate, function (match) {
+    const month = getPolishMonthNumber_(match[2]);
+    return {
+      day: Number(match[1]),
+      month: month,
+      year: match[3] ? Number(match[3]) : inferInfoCalendarYear_(month, Number(match[1]), messageDate)
+    };
+  })).forEach(function (dateMatch) {
+    if (!isValidDayMonth_(dateMatch.day, dateMatch.month)) return;
+    const date = new Date(dateMatch.year, dateMatch.month - 1, dateMatch.day);
+    if (date.getMonth() !== dateMatch.month - 1) return;
+    const context = getDirectorInfoContext_(source, dateMatch.index);
+    const time = extractDirectorInfoTime_(context);
+    if (!time && !isDirectorInfoEventContext_(context)) return;
+    const location = extractDirectorInfoLocation_(context);
+    const title = buildDirectorInfoTitle_(subject, context);
+    const allDay = !time;
+    const start = allDay ? startOfDay_(date) : makeDateTime_(date, time.start.hour, time.start.minute);
+    const end = allDay
+      ? addDays_(startOfDay_(date), 1)
+      : makeDateTime_(date, time.end.hour, time.end.minute);
+    if (!allDay && end <= start) end.setHours(end.getHours() + 1);
+    const key = [toIsoDate_(start), allDay ? 'all-day' : formatTime_(start), title].join('|');
+    if (seen[key]) return;
+    seen[key] = true;
+    events.push({
+      title: title,
+      location: location,
+      allDay: allDay,
+      start: start,
+      end: end,
+      startIso: start.toISOString(),
+      endIso: end.toISOString(),
+      dateEndIso: toIsoDate_(end),
+      context: context.slice(0, 900)
+    });
+  });
+  return events;
+}
+
+function isDirectorInfoEventContext_(context) {
+  const text = normalizeName_(context);
+  return [
+    'termin', 'rada', 'zebranie', 'spotkanie', 'wniosek', 'wnioski', 'urlop',
+    'stopnie', 'uspołecznienia', 'uspołecznienie', 'zawody', 'turniej', 'mecz',
+    'wydarzenie', 'uroczystosc', 'szkolenie', 'wyjazd', 'egzamin', 'konkurs',
+    'skladanie', 'przekazanie', 'deadline'
+  ].some(function (word) { return text.indexOf(normalizeName_(word)) !== -1; });
+}
+
+function collectDirectorInfoDateMatches_(source, regex, mapper) {
+  const result = [];
+  let match;
+  while ((match = regex.exec(source)) !== null) {
+    const item = mapper(match);
+    item.index = match.index;
+    result.push(item);
+  }
+  return result;
+}
+
+function inferInfoCalendarYear_(month, day, messageDate) {
+  const base = messageDate || new Date();
+  let year = base.getFullYear();
+  const candidate = new Date(year, month - 1, day);
+  if (candidate < addDays_(startOfDay_(base), -45)) year++;
+  return year;
+}
+
+function getPolishMonthNumber_(value) {
+  const key = normalizeName_(value);
+  const months = {
+    stycznia: 1, lutego: 2, marca: 3, kwietnia: 4, maja: 5, czerwca: 6,
+    lipca: 7, sierpnia: 8, wrzesnia: 9, pazdziernika: 10, listopada: 11, grudnia: 12
+  };
+  return months[key] || 0;
+}
+
+function getDirectorInfoContext_(source, index) {
+  const start = Math.max(0, index - 220);
+  const end = Math.min(source.length, index + 420);
+  return source.slice(start, end).replace(/\s+/g, ' ').trim();
+}
+
+function extractDirectorInfoTime_(context) {
+  const text = String(context || '').replace(/[–—]/g, '-');
+  const range = text.match(/\b(?:od\s*)?(\d{1,2})[:.](\d{2})\s*(?:-|do)\s*(\d{1,2})[:.](\d{2})\b/i);
+  if (range) {
+    const parsed = {
+      start: { hour: Number(range[1]), minute: Number(range[2]) },
+      end: { hour: Number(range[3]), minute: Number(range[4]) }
+    };
+    return isValidInfoClock_(parsed.start) && isValidInfoClock_(parsed.end) ? parsed : null;
+  }
+  const single = text.match(/\b(?:godz\.?|godzinie|o)\s*(\d{1,2})[:.](\d{2})\b/i);
+  if (!single) return null;
+  const start = { hour: Number(single[1]), minute: Number(single[2]) };
+  if (!isValidInfoClock_(start)) return null;
+  const endDate = new Date(2000, 0, 1, start.hour, start.minute);
+  endDate.setHours(endDate.getHours() + 1);
+  return { start: start, end: { hour: endDate.getHours(), minute: endDate.getMinutes() } };
+}
+
+function isValidInfoClock_(clock) {
+  return clock && Number.isInteger(clock.hour) && Number.isInteger(clock.minute)
+    && clock.hour >= 0 && clock.hour <= 23 && clock.minute >= 0 && clock.minute <= 59;
+}
+
+function extractDirectorInfoLocation_(context) {
+  const match = String(context || '').match(/\b(?:w|we|na)\s+((?:sali|gabinecie|internacie|auli|hali|sto[lł][oó]wce|boisku|MOW)[^.,;\n]{0,70})/i);
+  return match ? match[0].slice(0, 120) : 'MOW';
+}
+
+function buildDirectorInfoTitle_(subject, context) {
+  const cleanSubject = String(subject || '').replace(/\s+/g, ' ').trim();
+  if (cleanSubject && cleanSubject.length >= 4) return cleanSubject.slice(0, 120);
+  const cleanContext = String(context || '').replace(/\s+/g, ' ').trim();
+  return (cleanContext.slice(0, 100) || 'Termin z wiadomoĹ›ci dyrektora').replace(/[.:;,]+$/, '');
+}
+
+function buildDirectorInfoCalendarEvent_(item, key, subject) {
+  const description = [
+    'Automatycznie dodane z wiadomoĹ›ci dyrektora internatu.',
+    'Temat wiadomoĹ›ci: ' + (subject || ''),
+    'Fragment: ' + (item.context || ''),
+    'MOW_INFO_EVENT=1',
+    'MOW_INFO_KEY=' + key
+  ].join('\n');
+  const event = {
+    summary: item.title,
+    location: item.location || 'MOW',
+    description: description
+  };
+  if (item.allDay) {
+    event.start = { date: toIsoDate_(item.start) };
+    event.end = { date: toIsoDate_(item.end) };
+  } else {
+    event.start = { dateTime: item.startIso, timeZone: Session.getScriptTimeZone() };
+    event.end = { dateTime: item.endIso, timeZone: Session.getScriptTimeZone() };
+  }
+  return event;
+}
+
+function getCalendarShiftsForWeek_(view) {
+  const events = [];
+  const seen = {};
+  (view.days || []).forEach(function (day) {
+    (day.shifts || []).forEach(function (shift) {
+      expandShiftForCalendar_(shift).forEach(function (part) {
+        const key = [part.startIso, part.endIso, part.label, part.hours].join('|');
+        if (seen[key]) return;
+        seen[key] = true;
+        events.push(part);
+      });
+    });
+  });
+  events.sort(function (a, b) { return String(a.startIso).localeCompare(String(b.startIso)); });
+  return events;
+}
+
+function expandShiftForCalendar_(shift) {
+  if (!shift || !shift.startIso || !shift.endIso) return [];
+  const start = new Date(shift.startIso);
+  const end = new Date(shift.endIso);
+  if (!isFinite(start.getTime()) || !isFinite(end.getTime()) || end <= start) return [];
+
+  const isNight = String(shift.type || '').toLowerCase() === 'noc'
+    || String(shift.label || '').toLowerCase().indexOf('noc') !== -1;
+  if (!isNight) return [shift];
+
+  const midnight = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1);
+  if (end <= midnight || start >= midnight) {
+    return [normalizeCalendarNightPart_(shift, start, end, shift.nightPart || '')];
+  }
+
+  return [
+    normalizeCalendarNightPart_(shift, start, midnight, 'start'),
+    normalizeCalendarNightPart_(shift, midnight, end, 'end')
+  ].filter(function (part) { return Number(part.hoursValue || 0) > 0; });
+}
+
+function normalizeCalendarNightPart_(shift, start, end, nightPart) {
+  const copy = cloneShiftPart_(shift, start, end);
+  copy.type = 'noc';
+  copy.label = 'Noc';
+  copy.nightPart = nightPart || shift.nightPart || '';
+  if (copy.nightPart === 'start') {
+    copy.end = '24:00';
+    copy.hours = copy.start + '–24:00';
+  }
+  return copy;
+}
+
 function syncWeekToCalendar_(weekStart) {
   const view = buildWeekView_(weekStart, CONFIG.calendarEducator);
   if (!view.hasData) {
@@ -1082,8 +1367,7 @@ function syncWeekToCalendar_(weekStart) {
   });
 
   let inserted = 0;
-  view.days.forEach(function (day) {
-    day.shifts.forEach(function (shift) {
+  getCalendarShiftsForWeek_(view).forEach(function (shift) {
       const event = {
         summary: 'Praca MOW — ' + CONFIG.calendarEducator,
         location: 'MOW',
@@ -1093,7 +1377,6 @@ function syncWeekToCalendar_(weekStart) {
       };
       Calendar.Events.insert(event, CONFIG.calendarId);
       inserted++;
-    });
   });
   Logger.log('Kalendarz tydzień ' + weekStart + ': wychowawca=' + CONFIG.calendarEducator + ', usunięto=' + removed + ', dodano=' + inserted);
 }
