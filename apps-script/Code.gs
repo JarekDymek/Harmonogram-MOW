@@ -1,6 +1,6 @@
 const CONFIG = {
   appName: 'Harmonogram MOW',
-  backendVersion: '2026-06-21-stored-weeks',
+  backendVersion: '2026-06-22-calendar-resync',
   securityMode: 'token',
   sourceEmail: 'dgorski5@wp.pl',
   calendarId: 'primary',
@@ -40,7 +40,7 @@ function doGet(e) {
   const callback = params.callback || '';
   const transport = String(params.transport || params.format || '').toLowerCase();
   const educator = normalizeEducatorInput_(params.educator || CONFIG.defaultEducator);
-  const adminActions = { sync: true, scan: true, forceRescan: true, clearAllStoredWeeks: true, syncInfoCalendar: true };
+  const adminActions = { sync: true, scan: true, forceRescan: true, clearAllStoredWeeks: true, syncInfoCalendar: true, syncCalendar: true };
   const requiredLevel = adminActions[action] ? 'admin' : 'view';
   const access = requireAccess_(params, requiredLevel);
 
@@ -78,6 +78,12 @@ function doGet(e) {
       const scanResult = { currentInfoCalendar: syncDirectorInfoToCalendar_() };
       const dashboard = getDashboardData(educator);
       return jsonOutput_(backendResponse_(dashboard, scanResult, { action: 'syncInfoCalendar', access: access }), callback, transport);
+    }
+
+    if (action === 'syncCalendar') {
+      const scanResult = { calendarSyncedWeeks: syncVisibleWeeksToCalendar_() };
+      const dashboard = getDashboardData(educator);
+      return jsonOutput_(backendResponse_(dashboard, scanResult, { action: 'syncCalendar', access: access }), callback, transport);
     }
 
     if (action === 'dashboard') {
@@ -221,9 +227,7 @@ function forceRescan() {
 
 function scanAndSync() {
   const scanResult = scanMailbox_();
-  scanResult.changedWeeks.forEach(function (weekStart) {
-    syncWeekToCalendar_(weekStart);
-  });
+  scanResult.calendarSyncedWeeks = syncCalendarWeeks_(scanResult.changedWeeks.concat(getVisibleStoredWeekStarts_()));
   try {
     scanResult.currentInfoCalendar = syncDirectorInfoToCalendar_();
   } catch (err) {
@@ -231,6 +235,29 @@ function scanAndSync() {
     Logger.log('BĹ‚Ä…d synchronizacji terminĂłw z wiadomoĹ›ci dyrektora: ' + err.message);
   }
   return scanResult;
+}
+
+function syncVisibleWeeksToCalendar_() {
+  return syncCalendarWeeks_(getVisibleStoredWeekStarts_());
+}
+
+function syncCalendarWeeks_(weekStarts) {
+  const uniqueWeeks = {};
+  (weekStarts || []).forEach(function (weekStart) {
+    if (weekStart) uniqueWeeks[weekStart] = true;
+  });
+  const synced = Object.keys(uniqueWeeks).sort();
+  synced.forEach(function (weekStart) {
+    syncWeekToCalendar_(weekStart);
+  });
+  return synced;
+}
+
+function getVisibleStoredWeekStarts_() {
+  const currentMonday = mondayOf_(new Date());
+  return getDashboardWeekStarts_(currentMonday).filter(function (weekStart) {
+    return getScheduleDocs_(weekStart).length > 0;
+  });
 }
 
 function manualRefresh() {
