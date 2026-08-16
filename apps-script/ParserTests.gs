@@ -58,6 +58,15 @@ function runParserTests() {
   assertEqual_(parsedSecondPerson.days[4].hoursDay, 8, 'osoba druga PT hours');
   assertEqual_(parsedSecondPerson.days[5].hoursDay, 8, 'osoba druga SOB hours');
 
+  const fullInternatWeek = buildInternatWeekFromDocs_('2026-06-08', [{
+    weekNumber: 41,
+    rawText: sample,
+    educators: ['Pierwsza', 'Druga', 'Testowa'],
+    source: { filename: 'grafik-testowy.docx', priority: 90, messageDate: '2026-06-01T10:00:00.000Z' }
+  }]);
+  assertEqual_(fullInternatWeek.staffCount, 3, 'full internat staff count');
+  assertEqual_(fullInternatWeek.days[0].shifts.length, 3, 'full internat Monday shifts');
+
   Logger.log('Parser tests OK');
 }
 

@@ -1,6 +1,7 @@
 const CACHE_PREFIX = 'harmonogram-mow-shell-';
-const CACHE = `${CACHE_PREFIX}12.1.3`;
-const ASSETS = ['./', './index.html', './assets/styles.css', './assets/app.js', './assets/icon.svg', './assets/icon-maskable.svg', './manifest.webmanifest', './data/sample-weeks.json'];
+const APP_VERSION = '12.2.0';
+const CACHE = `${CACHE_PREFIX}${APP_VERSION}`;
+const ASSETS = ['./', './index.html', './assets/styles.css?v=12.2.0', './assets/app.js?v=12.2.0', './assets/icon.svg', './assets/icon-maskable.svg', './manifest.webmanifest', './data/sample-weeks.json'];
 const ASSET_URLS = new Set(ASSETS.map(path => new URL(path, self.registration.scope).href));
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting()));
@@ -11,6 +12,9 @@ self.addEventListener('activate', event => {
       .then(keys => Promise.all(keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE).map(key => caches.delete(key))))
       .then(() => self.clients.claim())
   );
+});
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 self.addEventListener('fetch', event => {
   const request = event.request;

@@ -142,6 +142,28 @@ await test('testy regresji parsera Apps Script', () => {
   new vm.Script('runParserTests();').runInContext(context);
 });
 
+await test('pełny plan internatu łączy dyżury wszystkich osób dla tygodnia', () => {
+  const runtime = createAppsScriptContext();
+  new vm.Script(read('apps-script/Code.gs'), { filename: 'apps-script/Code.gs' }).runInContext(runtime.context);
+  runtime.context.testDocs = [{
+    weekNumber: 41,
+    rawText: [
+      'INTERNAT', 'VI',
+      '600-800 Osoba Pierwsza', '1400-2200 Osoba Druga',
+      '600-800 Osoba Pierwsza', '1400-2200 Osoba Druga',
+      'NOC'
+    ].join('\n'),
+    educators: ['Pierwsza', 'Druga'],
+    source: { filename: 'grafik-testowy.docx', priority: 90, messageDate: '2026-06-01T10:00:00.000Z' }
+  }];
+  new vm.Script("globalThis.fullInternatWeek = buildInternatWeekFromDocs_('2026-06-08', testDocs);").runInContext(runtime.context);
+  assert.equal(runtime.context.fullInternatWeek.staffCount, 2);
+  assert.equal(runtime.context.fullInternatWeek.shiftCount, 4);
+  assert.equal(runtime.context.fullInternatWeek.days[0].shifts.length, 2);
+  assert.equal(runtime.context.fullInternatWeek.days[1].shifts.length, 2);
+  assert.deepEqual(Array.from(runtime.context.fullInternatWeek.staff), ['Druga', 'Pierwsza']);
+});
+
 await test('duże dane Apps Script są kompresowane, dzielone i odtwarzane', () => {
   const runtime = createAppsScriptContext();
   new vm.Script(read('apps-script/Code.gs'), { filename: 'apps-script/Code.gs' }).runInContext(runtime.context);
@@ -193,6 +215,23 @@ await test('synchronizacja kalendarza jest idempotentna i nie usuwa przed wstawi
   assert.equal(runtime.context.secondSync.inserted, 0);
   assert.equal(runtime.context.secondSync.removed, 0);
   assert.equal(runtime.context.secondSync.unchanged, 1);
+});
+
+await test('interfejs 12.2 ma jedno menu, auto-synchronizację i wersjonowane zasoby', () => {
+  const html = read('index.html');
+  const app = read('assets/app.js');
+  const worker = read('service-worker.js');
+  const sample = JSON.parse(read('data/sample-weeks.json'));
+  const packageData = JSON.parse(read('package.json'));
+  assert.equal(packageData.version, '12.2.0');
+  assert.equal((html.match(/id="actionsMenu"/g) || []).length, 1);
+  assert.match(html, /<option value="internat">Cały internat<\/option>/);
+  assert.match(html, /assets\/app\.js\?v=12\.2\.0/);
+  assert.match(html, /assets\/styles\.css\?v=12\.2\.0/);
+  assert.match(app, /autoRefreshFromBackend\('start'\)/);
+  assert.match(app, /state\.adminToken \? 'sync' : 'dashboard'/);
+  assert.match(worker, /APP_VERSION = '12\.2\.0'/);
+  assert.ok(sample.internatWeeks?.['2026-06-08'], 'Brak demonstracyjnego planu całego internatu');
 });
 
 await test('service worker nie przechwytuje obcych i nieznanych zasobów', async () => {

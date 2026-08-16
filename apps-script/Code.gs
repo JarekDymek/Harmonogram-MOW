@@ -1,6 +1,6 @@
 const CONFIG = {
   appName: 'Harmonogram MOW',
-  backendVersion: '2026-08-16-audit-12.1.3',
+  backendVersion: '2026-08-16-full-internat-12.2.0',
   securityMode: 'token',
   sourceEmail: 'harmonogram@example.com',
   calendarId: 'primary',
@@ -93,6 +93,22 @@ function doGet(e) {
     if (action === 'dashboard') {
       const dashboard = getDashboardData(educator);
       return jsonOutput_(backendResponse_(dashboard, null, { action: 'dashboard', access: access }), callback, transport);
+    }
+
+    if (action === 'internat') {
+      const weekStart = String(params.weekStart || '');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart) || getDashboardWeekStarts_(mondayOf_(new Date())).indexOf(weekStart) === -1) {
+        throw new Error('Nieprawidłowy albo niedostępny tydzień planu internatu.');
+      }
+      const internatWeek = buildInternatWeekView_(weekStart);
+      return jsonOutput_({
+        ok: true,
+        action: 'internat',
+        data: { internatWeek: internatWeek },
+        internatWeek: internatWeek,
+        generatedAt: new Date().toISOString(),
+        security: getSecurityPublicInfo_(access)
+      }, callback, transport);
     }
 
     return jsonOutput_({ ok: false, error: 'Nieznana akcja: ' + action, data: null, weeks: [], history: [], alerts: [] }, callback, transport);
@@ -1067,6 +1083,75 @@ function buildWeekView_(weekStart, educator) {
       weekendHours: weekendHours,
       weekendWorkDays: days.filter(function (day) { return day.weekend && Number(day.hoursDay || 0) > 0; }).length
     },
+    days: days
+  };
+}
+
+function buildInternatWeekView_(weekStart) {
+  return buildInternatWeekFromDocs_(weekStart, getScheduleDocs_(weekStart));
+}
+
+function buildInternatWeekFromDocs_(weekStart, docs) {
+  const sortedDocs = (docs || []).slice().sort(compareDocs_);
+  const staffMap = {};
+  sortedDocs.forEach(function (doc) {
+    const names = Array.isArray(doc.educators) && doc.educators.length
+      ? doc.educators
+      : collectEducatorsFromText_(doc.rawText || '');
+    names.forEach(function (name) {
+      const simplified = simplifyEducatorName_(name);
+      if (simplified) staffMap[simplified] = true;
+    });
+  });
+
+  const staff = Object.keys(staffMap).sort(function (a, b) { return a.localeCompare(b, 'pl'); }).slice(0, 80);
+  const days = makeEmptyDays_(weekStart);
+  const visibleStaff = [];
+
+  staff.forEach(function (educator) {
+    const selected = chooseBestPlanForEducator_(sortedDocs, weekStart, educator);
+    if (!selected.found) return;
+    let hasShift = false;
+    (selected.parsed.days || []).forEach(function (personDay, dayIndex) {
+      (personDay.shifts || []).forEach(function (shift) {
+        const copy = {};
+        Object.keys(shift).forEach(function (key) { copy[key] = shift[key]; });
+        copy.educator = educator;
+        days[dayIndex].shifts.push(copy);
+        hasShift = true;
+      });
+    });
+    if (hasShift) visibleStaff.push(educator);
+  });
+
+  let shiftCount = 0;
+  let totalHours = 0;
+  days.forEach(function (day) {
+    day.shifts.sort(function (a, b) {
+      const byTime = String(a.start || '').localeCompare(String(b.start || ''));
+      return byTime || String(a.educator || '').localeCompare(String(b.educator || ''), 'pl');
+    });
+    day.hoursDay = round2_(day.shifts.reduce(function (sum, shift) { return sum + Number(shift.hoursValue || shift.duration || 0); }, 0));
+    shiftCount += day.shifts.length;
+    totalHours += day.hoursDay;
+  });
+
+  const source = sortedDocs.length && sortedDocs[0].source ? sortedDocs[0].source : null;
+  const weekNumber = sortedDocs.length ? sortedDocs[0].weekNumber : null;
+  return {
+    weekNumber: weekNumber,
+    label: weekNumber ? 'Tydzień ' + weekNumber : 'Tydzień',
+    range: formatRange_(weekStart),
+    dateFrom: weekStart,
+    dateTo: toIsoDate_(addDays_(parseIsoDate_(weekStart), 6)),
+    weekStart: weekStart,
+    weekEnd: toIsoDate_(addDays_(parseIsoDate_(weekStart), 6)),
+    hasData: sortedDocs.length > 0,
+    source: source ? source.filename : '',
+    staff: visibleStaff,
+    staffCount: visibleStaff.length,
+    shiftCount: shiftCount,
+    totalHours: round2_(totalHours),
     days: days
   };
 }

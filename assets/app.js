@@ -1,3 +1,4 @@
+const APP_VERSION = '12.2.0';
 const STORAGE_KEY = 'harmonogram-mow-state-v12';
 const LEGACY_STORAGE_KEYS = ['harmonogram-mow-state-v11', 'harmonogram-mow-state-v10', 'harmonogram-mow-state-v9', 'harmonogram-mow-state-v8'];
 const DEFAULT_STATE = {
@@ -13,6 +14,7 @@ const DEFAULT_STATE = {
   history: [],
   alerts: [],
   changes: [],
+  internatWeeks: {},
   availableEducators: [],
   seenAlertIds: [],
   lastSync: null,
@@ -23,6 +25,11 @@ const DEFAULT_STATE = {
 
 const $ = (id) => document.getElementById(id);
 let deferredInstallPrompt = null;
+let serviceWorkerRegistration = null;
+let serviceWorkerReloading = false;
+let automaticRefreshPromise = null;
+let hiddenAt = 0;
+const internatWeekRequests = new Map();
 let state = loadState();
 if (state.weeks && state.weeks.length) {
   state.activeTab = getPreferredWeekIndex(state.weeks);
@@ -32,23 +39,20 @@ if (state.weeks && state.weeks.length) {
 window.addEventListener('beforeinstallprompt', (event) => {
   event.preventDefault();
   deferredInstallPrompt = event;
-  $('installBtn').classList.remove('hidden');
+  updateInstallUi();
 });
 
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./service-worker.js').catch(() => {});
-}
-
-$('installBtn').addEventListener('click', async () => {
-  if (!deferredInstallPrompt) return;
-  deferredInstallPrompt.prompt();
-  await deferredInstallPrompt.userChoice;
+window.addEventListener('appinstalled', () => {
   deferredInstallPrompt = null;
-  $('installBtn').classList.add('hidden');
+  updateInstallUi();
+  toast('Aplikacja została zainstalowana.');
 });
 
 $('refreshBtn').addEventListener('click', refreshFromBackend);
-$('settingsBtn').addEventListener('click', () => $('settingsPanel').classList.toggle('hidden'));
+$('settingsBtn').addEventListener('click', () => {
+  $('settingsPanel').classList.toggle('hidden');
+  $('actionsMenu')?.removeAttribute('open');
+});
 $('sampleBtn').addEventListener('click', loadSampleData);
 $('dashboardBtn').addEventListener('click', loadDashboardOnly);
 const testBackendBtn = $('testBackendBtn');
@@ -57,18 +61,48 @@ $('saveSettingsBtn').addEventListener('click', () => saveSettings());
 $('clearCacheBtn').addEventListener('click', clearCache);
 $('exportBtn').addEventListener('click', exportHistoryCsv);
 $('notifyBtn').addEventListener('click', enableNotifications);
+const installBtn = $('installBtn');
+if (installBtn) installBtn.addEventListener('click', installApplication);
+const updateBtn = $('updateBtn');
+if (updateBtn) updateBtn.addEventListener('click', () => checkForAppUpdate(true));
 const dayFilterEl = $('dayFilter');
-if (dayFilterEl) dayFilterEl.addEventListener('change', () => { state.dayFilter = dayFilterEl.value || 'all'; persist(); render(); });
+if (dayFilterEl) dayFilterEl.addEventListener('change', () => {
+  state.dayFilter = dayFilterEl.value || 'all';
+  persist();
+  render();
+  if (state.dayFilter === 'internat') ensureInternatWeekLoaded();
+});
 const printBtn = $('printBtn');
 if (printBtn) printBtn.addEventListener('click', printCurrentWeekPdf);
 const shareViewBtn = $('shareViewBtn');
 if (shareViewBtn) shareViewBtn.addEventListener('click', copyShareSummary);
 const educatorInput = $('educator');
 if (educatorInput) educatorInput.addEventListener('change', () => { state.educator = educatorInput.value.trim() || 'Dymek'; persist(); render(); });
+const actionsMenu = $('actionsMenu');
+if (actionsMenu) actionsMenu.querySelectorAll('button').forEach(button => {
+  button.addEventListener('click', () => actionsMenu.removeAttribute('open'));
+});
 
 hydrateSettings();
 render();
-if (!state.weeks.length) loadSampleData(false);
+initializePwa();
+if (state.backendUrl && (state.adminToken || state.viewToken)) {
+  queueMicrotask(() => autoRefreshFromBackend('start'));
+} else if (!state.weeks.length) {
+  loadSampleData(false);
+}
+
+window.addEventListener('pageshow', event => {
+  if (event.persisted) autoRefreshFromBackend('resume');
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    hiddenAt = Date.now();
+    return;
+  }
+  if (hiddenAt && Date.now() - hiddenAt > 5 * 60 * 1000) autoRefreshFromBackend('resume');
+  hiddenAt = 0;
+});
 
 function loadState() {
   const keys = [STORAGE_KEY, ...LEGACY_STORAGE_KEYS];
@@ -85,6 +119,7 @@ function loadState() {
         history: Array.isArray(parsed.history) ? sortHistoryRows(parsed.history) : [],
         alerts: Array.isArray(parsed.alerts) ? parsed.alerts : [],
         changes: Array.isArray(parsed.changes) ? parsed.changes : [],
+        internatWeeks: parsed.internatWeeks && typeof parsed.internatWeeks === 'object' && !Array.isArray(parsed.internatWeeks) ? parsed.internatWeeks : {},
         availableEducators: Array.isArray(parsed.availableEducators) ? parsed.availableEducators : [],
         seenAlertIds: Array.isArray(parsed.seenAlertIds) ? parsed.seenAlertIds : []
       };
@@ -104,6 +139,7 @@ function freshDefaultState() {
     history: [],
     alerts: [],
     changes: [],
+    internatWeeks: {},
     availableEducators: [],
     seenAlertIds: []
   };
@@ -125,8 +161,10 @@ function hydrateSettings() {
   if ($('shareMode')) $('shareMode').value = state.shareMode || 'full';
   if ($('dayFilter')) $('dayFilter').value = state.dayFilter || 'all';
   $('educator').value = state.educator || 'Dymek';
+  if ($('appVersion')) $('appVersion').textContent = APP_VERSION;
   renderEducatorDatalist();
   applyLayoutMode();
+  updateInstallUi();
 }
 
 function normalizeBackendUrl(value) {
@@ -176,10 +214,116 @@ function applyLayoutMode() {
   document.documentElement.dataset.layout = mode;
 }
 
-function backendUrlWithParams(action) {
+function isStandaloneMode() {
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+
+function updateInstallUi() {
+  const button = $('installBtn');
+  if (!button) return;
+  if (isStandaloneMode()) {
+    button.textContent = 'Aplikacja zainstalowana';
+    button.disabled = true;
+    return;
+  }
+  button.disabled = false;
+  button.textContent = deferredInstallPrompt ? 'Zainstaluj aplikację' : 'Jak zainstalować';
+}
+
+async function installApplication() {
+  if (isStandaloneMode()) {
+    toast('Ta aplikacja jest już uruchomiona jako zainstalowana PWA.');
+    return;
+  }
+  if (!deferredInstallPrompt) {
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent || '');
+    toast(ios
+      ? 'Na iPhonie lub iPadzie wybierz Udostępnij → Dodaj do ekranu początkowego.'
+      : 'W menu przeglądarki wybierz „Zainstaluj aplikację” albo „Dodaj do ekranu głównego”.');
+    return;
+  }
+  deferredInstallPrompt.prompt();
+  await deferredInstallPrompt.userChoice;
+  deferredInstallPrompt = null;
+  updateInstallUi();
+}
+
+async function initializePwa() {
+  const status = $('updateStatus');
+  if (!('serviceWorker' in navigator)) {
+    if (status) status.textContent = `Wersja ${APP_VERSION} • brak obsługi offline`;
+    return;
+  }
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    const reloadKey = `harmonogram-mow-reloaded-${APP_VERSION}`;
+    if (serviceWorkerReloading || sessionStorage.getItem(reloadKey)) return;
+    serviceWorkerReloading = true;
+    sessionStorage.setItem(reloadKey, '1');
+    window.location.reload();
+  });
+  try {
+    serviceWorkerRegistration = await navigator.serviceWorker.register('./service-worker.js');
+    watchServiceWorkerRegistration(serviceWorkerRegistration);
+    await checkForAppUpdate(false);
+  } catch (error) {
+    if (status) status.textContent = `Wersja ${APP_VERSION} • tryb online`;
+    console.warn('Nie udało się uruchomić aktualizacji PWA.', error);
+  }
+}
+
+function watchServiceWorkerRegistration(registration) {
+  const status = $('updateStatus');
+  if (registration.waiting) {
+    if (status) status.textContent = 'Aktualizacja gotowa — przeładowuję…';
+    registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+  }
+  registration.addEventListener('updatefound', () => {
+    const worker = registration.installing;
+    if (!worker) return;
+    if (status) status.textContent = 'Pobieranie aktualizacji…';
+    worker.addEventListener('statechange', () => {
+      if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+        if (status) status.textContent = 'Aktualizacja gotowa — przeładowuję…';
+      } else if (worker.state === 'activated') {
+        if (status) status.textContent = `Wersja ${APP_VERSION} • aktualna`;
+      }
+    });
+  });
+}
+
+async function checkForAppUpdate(manual = false) {
+  const status = $('updateStatus');
+  const button = $('updateBtn');
+  if (!serviceWorkerRegistration) {
+    if (manual) toast('Aktualizacje PWA nie są dostępne w tej przeglądarce.');
+    return;
+  }
+  if (button) button.disabled = true;
+  if (status) status.textContent = 'Sprawdzanie aktualizacji…';
+  try {
+    await serviceWorkerRegistration.update();
+    if (serviceWorkerRegistration.waiting) {
+      serviceWorkerRegistration.waiting.postMessage({ type: 'SKIP_WAITING' });
+      if (status) status.textContent = 'Aktualizacja gotowa — przeładowuję…';
+      return;
+    }
+    if (status) status.textContent = `Wersja ${APP_VERSION} • aktualna`;
+    if (manual) toast(`Masz aktualną wersję ${APP_VERSION}.`);
+  } catch (error) {
+    if (status) status.textContent = `Wersja ${APP_VERSION} • nie sprawdzono online`;
+    if (manual) toast('Nie udało się sprawdzić aktualizacji: ' + error.message);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function backendUrlWithParams(action, extraParams = {}) {
   const url = new URL(state.backendUrl);
   url.searchParams.set('action', action);
   url.searchParams.set('educator', state.educator || 'Dymek');
+  Object.entries(extraParams).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
+  });
   if (state.adminToken) url.searchParams.set('token', state.adminToken);
   else if (state.viewToken) url.searchParams.set('token', state.viewToken);
   url.searchParams.set('transport', 'bridge');
@@ -221,22 +365,38 @@ async function loadSampleData(showToast = true) {
   }
 }
 
-async function refreshFromBackend() {
+async function autoRefreshFromBackend(reason = 'start') {
+  if (!state.backendUrl || (!state.adminToken && !state.viewToken)) return;
+  if (automaticRefreshPromise) return automaticRefreshPromise;
+  automaticRefreshPromise = refreshFromBackend({ automatic: true, reason });
+  try {
+    await automaticRefreshPromise;
+  } finally {
+    automaticRefreshPromise = null;
+  }
+}
+
+async function refreshFromBackend(options = {}) {
   if (!saveSettings({ silent: true })) return;
   if (!state.backendUrl) {
-    toast('Najpierw wpisz adres backendu Apps Script w ustawieniach.');
-    $('settingsPanel').classList.remove('hidden');
+    if (!options.automatic) {
+      toast('Najpierw wpisz adres backendu Apps Script w ustawieniach.');
+      $('settingsPanel').classList.remove('hidden');
+    }
     return;
   }
   const button = $('refreshBtn');
-  button.disabled = true;
+  if (button) button.disabled = true;
   try {
     const action = state.adminToken ? 'sync' : 'dashboard';
-    toast(state.adminToken ? 'Synchronizuję Gmail i Kalendarz…' : 'Pobieram widok z backendu bez zapisu do kalendarza…');
+    toast(state.adminToken
+      ? (options.automatic ? 'Automatyczna synchronizacja przy uruchomieniu…' : 'Synchronizuję Gmail i Kalendarz…')
+      : 'Pobieram widok z backendu bez zapisu do kalendarza…');
     const payload = await requestBackend(backendUrlWithParams(action));
     state.backendError = '';
     const dashboard = extractDashboard(payload);
     applyPayload(dashboard);
+    if (state.dayFilter === 'internat') await ensureInternatWeekLoaded();
     const suffix = (state.educator || 'Dymek') === (state.calendarEducator || 'Dymek') ? '' : ' Kalendarz Google pozostał tylko dla ' + (state.calendarEducator || 'Dymek') + '.';
     toast((state.adminToken ? 'Synchronizacja zakończona.' : 'Widok pobrany.') + suffix);
   } catch (error) {
@@ -245,7 +405,7 @@ async function refreshFromBackend() {
     render();
     toast(`Błąd backendu: ${error.message}`);
   } finally {
-    button.disabled = false;
+    if (button) button.disabled = false;
   }
 }
 
@@ -263,6 +423,7 @@ async function loadDashboardOnly() {
     const payload = await requestBackend(backendUrlWithParams('dashboard'));
     state.backendError = '';
     applyPayload(extractDashboard(payload));
+    if (state.dayFilter === 'internat') await ensureInternatWeekLoaded();
     toast('Widok pobrany. Nic nie zapisano do Kalendarza Google.');
   } catch (error) {
     state.backendError = error.message;
@@ -353,6 +514,7 @@ function applyPayload(payload) {
   state.history = normalized.history;
   state.alerts = incomingAlerts;
   state.changes = normalized.changes || collectChangesFromWeeks(normalized.weeks);
+  state.internatWeeks = normalized.internatWeeks || {};
   state.availableEducators = normalized.availableEducators || state.availableEducators || [];
   state.lastSync = normalized.updatedAt || new Date().toISOString();
   state.educator = normalized.educator || state.educator || 'Dymek';
@@ -374,7 +536,8 @@ function normalizePayload(payload) {
   const cleanSource = repairMojibake(source || {});
   const weeks = (cleanSource.weeks || []).map(normalizeWeek).sort(compareWeekLikeAsc);
   const history = sortHistoryRows(cleanSource.history && cleanSource.history.length ? cleanSource.history : weeks.map(weekToHistoryRow));
-  return { weeks, history, alerts: cleanSource.alerts || [], changes: cleanSource.changes || collectChangesFromWeeks(weeks), availableEducators: cleanSource.availableEducators || [], updatedAt: cleanSource.updatedAt || cleanSource.generatedAt, educator: cleanSource.educator, calendarEducator: cleanSource.calendarEducator, security: cleanSource.security || {} };
+  const internatWeeks = Object.fromEntries(Object.entries(cleanSource.internatWeeks || {}).map(([weekStart, week]) => [weekStart, normalizeInternatWeek(week)]));
+  return { weeks, history, alerts: cleanSource.alerts || [], changes: cleanSource.changes || collectChangesFromWeeks(weeks), internatWeeks, availableEducators: cleanSource.availableEducators || [], updatedAt: cleanSource.updatedAt || cleanSource.generatedAt, educator: cleanSource.educator, calendarEducator: cleanSource.calendarEducator, security: cleanSource.security || {} };
 }
 
 function repairMojibake(value) {
@@ -425,11 +588,44 @@ function normalizeWeek(week) {
     const changes = Array.isArray(incoming.changes) ? incoming.changes : [];
     const warnings = detectDayWarnings(shifts, incoming, index);
     const hasChange = Boolean(incoming.hasChange || changes.length);
-    return { ...day, date: incoming.date || formatShortDate(isoDate), isoDate, shifts, hoursDay, weekend: index >= 5, zmieniam, zmienia, changes, hasChange, warnings }; 
+    return { ...day, date: incoming.date || formatShortDate(isoDate), isoDate, shifts, hoursDay, weekend: index >= 5, zmieniam, zmienia, changes, hasChange, warnings };
   });
   const totalHours = round(days.reduce((sum, day) => sum + day.hoursDay, 0));
   const weekendHours = round(days.filter(d => d.weekend).reduce((sum, day) => sum + day.hoursDay, 0));
   return { ...week, days, summary: { ...(week.summary || {}), totalHours, overtimeHours: Math.max(0, round(totalHours - 24)), weekendHours, weekendWorkDays: days.filter(d => d.weekend && d.hoursDay > 0).length } };
+}
+
+function normalizeInternatWeek(week = {}) {
+  const weekStart = week.weekStart || week.dateFrom || '';
+  const days = DAYS.map((day, index) => {
+    const incoming = (week.days || [])[index] || {};
+    const isoDate = incoming.isoDate || addDaysIso(weekStart, index);
+    const shifts = (incoming.shifts || []).map(shift => ({
+      ...normalizeShift(shift),
+      educator: shift.educator || shift.person || shift.personRaw || 'Nieznana osoba'
+    })).sort((a, b) => String(a.start || '').localeCompare(String(b.start || '')) || String(a.educator).localeCompare(String(b.educator), 'pl'));
+    return {
+      ...day,
+      date: incoming.date || formatShortDate(isoDate),
+      isoDate,
+      weekend: index >= 5,
+      shifts,
+      hoursDay: round(shifts.reduce((sum, shift) => sum + numberOr(shift.duration, 0), 0))
+    };
+  });
+  const names = Array.from(new Set(days.flatMap(day => day.shifts.map(shift => shift.educator)).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'pl'));
+  return {
+    ...week,
+    weekStart,
+    dateFrom: week.dateFrom || weekStart,
+    dateTo: week.dateTo || addDaysIso(weekStart, 6),
+    range: week.range || `${formatShortDate(weekStart)} – ${formatShortDate(addDaysIso(weekStart, 6))}`,
+    days,
+    staff: Array.isArray(week.staff) && week.staff.length ? week.staff : names,
+    staffCount: numberOr(week.staffCount, names.length),
+    shiftCount: numberOr(week.shiftCount, days.reduce((sum, day) => sum + day.shifts.length, 0)),
+    totalHours: numberOr(week.totalHours, round(days.reduce((sum, day) => sum + day.hoursDay, 0)))
+  };
 }
 
 function normalizeShift(shift) {
@@ -532,6 +728,7 @@ function renderTabs() {
     state.weekTabOffset = getWeekTabOffsetForActive(state.activeTab, weeks.length);
     persist();
     render();
+    if (state.dayFilter === 'internat') ensureInternatWeekLoaded();
   }));
   target.querySelectorAll('[data-week-nav]').forEach(btn => btn.addEventListener('click', () => {
     const step = Number(btn.dataset.weekNav || 0);
@@ -539,6 +736,7 @@ function renderTabs() {
     state.weekTabOffset = getWeekTabOffsetForActive(state.activeTab, weeks.length);
     persist();
     render();
+    if (state.dayFilter === 'internat') ensureInternatWeekLoaded();
   }));
 }
 
@@ -586,17 +784,108 @@ function getWeekRelationLabel(week, index) {
   return week.label || 'Tydzień';
 }
 
+function getActiveWeek() {
+  if (!state.weeks.length) return null;
+  return state.weeks[Math.min(Math.max(Number(state.activeTab || 0), 0), state.weeks.length - 1)] || null;
+}
+
+function getWeekCacheKey(week) {
+  return String((week && (week.weekStart || week.dateFrom)) || '');
+}
+
+async function ensureInternatWeekLoaded() {
+  const week = getActiveWeek();
+  const weekStart = getWeekCacheKey(week);
+  if (!week || !weekStart || state.internatWeeks?.[weekStart]) return;
+  if (!state.backendUrl) {
+    render();
+    toast('Widok całego internatu wymaga połączenia z backendem albo danych testowych zawierających pełny plan.');
+    return;
+  }
+  if (internatWeekRequests.has(weekStart)) return internatWeekRequests.get(weekStart);
+
+  const request = (async () => {
+    render();
+    try {
+      const payload = await requestBackend(backendUrlWithParams('internat', { weekStart }));
+      if (payload?.ok === false) throw new Error(payload.error || 'backend zwrócił ok=false');
+      const rawWeek = payload?.data?.internatWeek || payload?.internatWeek;
+      if (!rawWeek || !Array.isArray(rawWeek.days)) throw new Error('backend nie zwrócił pełnego planu internatu');
+      state.internatWeeks = { ...(state.internatWeeks || {}), [weekStart]: normalizeInternatWeek(rawWeek) };
+      state.backendError = '';
+      persist();
+      render();
+      toast('Pobrano plan całego internatu dla wybranego tygodnia.');
+    } catch (error) {
+      state.backendError = error.message;
+      persist();
+      render();
+      toast('Nie udało się pobrać planu całego internatu: ' + error.message);
+    } finally {
+      internatWeekRequests.delete(weekStart);
+    }
+  })();
+  internatWeekRequests.set(weekStart, request);
+  return request;
+}
+
 function renderWeek() {
   if (!state.weeks.length) {
     $('weekView').innerHTML = '<section class="card"><p class="empty">Brak danych. Wpisz backend albo załaduj dane testowe.</p></section>';
     return;
   }
-  const week = state.weeks[Math.min(state.activeTab, state.weeks.length - 1)];
+  const week = getActiveWeek();
+  if (state.dayFilter === 'internat') {
+    renderInternatWeek(week);
+    return;
+  }
   const s = week.summary || {};
   const noPlan = week.hasData && week.hasEducatorPlan === false ? `<p class="warning-line">W tym dokumencie nie znaleziono dyżurów dla: ${escapeHtml(state.educator || '')}.</p>` : '';
   const visibleDays = filterDays(week.days || []);
   const emptyFilter = visibleDays.length ? '' : '<section class="card"><p class="empty">Brak dni pasujących do wybranego filtra.</p></section>';
-  $('weekView').innerHTML = `<section class="card week-head"><div><p class="eyebrow">${escapeHtml(week.label || 'Tydzień')}</p><h2>${escapeHtml(week.range || `${week.dateFrom} – ${week.dateTo}`)}</h2><p class="hint">${escapeHtml(week.source || 'Źródło: Gmail / dokument internatu')}</p>${noPlan}</div><div class="metrics"><div class="metric"><span>Godziny</span><strong>${numberOr(s.totalHours, 0)}</strong></div><div class="metric"><span>Nadgodziny</span><strong>${numberOr(s.overtimeHours, 0)}</strong></div><div class="metric"><span>Weekend h</span><strong>${numberOr(s.weekendHours, 0)}</strong></div><div class="metric"><span>Dni weekend</span><strong>${numberOr(s.weekendWorkDays, 0)}</strong></div></div></section>${emptyFilter || `<section class="days">${visibleDays.map(renderDay).join('')}</section>`}`;
+  $('weekView').innerHTML = `<section class="card week-head"><div class="week-heading-copy"><p class="eyebrow">${escapeHtml(week.label || 'Tydzień')}</p><h2>${escapeHtml(week.range || `${week.dateFrom} – ${week.dateTo}`)}</h2><p class="hint">${escapeHtml(week.source || 'Źródło: Gmail / dokument internatu')}</p>${noPlan}</div><div class="metrics"><div class="metric"><span>Godziny</span><strong>${numberOr(s.totalHours, 0)}</strong></div><div class="metric"><span>Nadgodziny</span><strong>${numberOr(s.overtimeHours, 0)}</strong></div><div class="metric"><span>Weekend h</span><strong>${numberOr(s.weekendHours, 0)}</strong></div><div class="metric"><span>Dni weekend</span><strong>${numberOr(s.weekendWorkDays, 0)}</strong></div></div></section>${emptyFilter || `<section class="days">${visibleDays.map(renderDay).join('')}</section>`}`;
+}
+
+function renderInternatWeek(selectedWeek) {
+  const weekStart = getWeekCacheKey(selectedWeek);
+  const fullWeek = state.internatWeeks?.[weekStart];
+  if (!fullWeek) {
+    const loading = internatWeekRequests.has(weekStart);
+    const message = loading
+      ? 'Pobieram pełny plan internatu dla tego tygodnia…'
+      : (state.backendUrl
+        ? 'Pełny plan nie został jeszcze pobrany. Wybierz ponownie „Cały internat” albo użyj „Pobierz / synchronizuj teraz”.'
+        : 'Pełny plan internatu wymaga skonfigurowanego backendu.');
+    $('weekView').innerHTML = `<section class="card internat-placeholder"><p class="eyebrow">Cały internat</p><h2>${escapeHtml(selectedWeek.range || `${selectedWeek.dateFrom} – ${selectedWeek.dateTo}`)}</h2><p class="empty">${escapeHtml(message)}</p></section>`;
+    return;
+  }
+
+  const source = fullWeek.source || selectedWeek.source || 'Dokument internatu';
+  $('weekView').innerHTML = `
+    <section class="card week-head internat-head">
+      <div class="week-heading-copy">
+        <p class="eyebrow">Cały internat • ${escapeHtml(selectedWeek.label || 'Tydzień')}</p>
+        <h2>${escapeHtml(fullWeek.range || selectedWeek.range || `${selectedWeek.dateFrom} – ${selectedWeek.dateTo}`)}</h2>
+        <p class="hint">${escapeHtml(source)}</p>
+      </div>
+      <div class="metrics internat-metrics">
+        <div class="metric"><span>Osoby</span><strong>${numberOr(fullWeek.staffCount, 0)}</strong></div>
+        <div class="metric"><span>Dyżury</span><strong>${numberOr(fullWeek.shiftCount, 0)}</strong></div>
+        <div class="metric"><span>Łącznie h</span><strong>${numberOr(fullWeek.totalHours, 0)}</strong></div>
+      </div>
+    </section>
+    <section class="internat-days">${(fullWeek.days || []).map(renderInternatDay).join('')}</section>`;
+}
+
+function renderInternatDay(day) {
+  const shifts = (day.shifts || []).map(shift => {
+    const relation = [
+      shift.replacesPerson ? `zmienia: ${shift.replacesPerson}` : '',
+      shift.replacedByPerson ? `przekazuje: ${shift.replacedByPerson}` : ''
+    ].filter(Boolean).join(' • ');
+    return `<div class="internat-shift ${shiftClassName(shift.type)}"><strong class="internat-hours">${escapeHtml(shift.hours)}</strong><div class="internat-person"><strong>${escapeHtml(shift.educator)}</strong><span>${escapeHtml(shift.label || 'Dyżur')}${relation ? ` • ${escapeHtml(relation)}` : ''}</span></div></div>`;
+  }).join('') || '<p class="empty">Brak dyżurów.</p>';
+  return `<article class="internat-day ${day.weekend ? 'weekend' : ''}"><header><div><strong>${escapeHtml(day.name)}</strong><span>${escapeHtml(day.date)}</span></div><span>${numberOr(day.hoursDay, 0)} h łącznie</span></header><div class="internat-shift-list">${shifts}</div></article>`;
 }
 
 function renderDay(day) {
