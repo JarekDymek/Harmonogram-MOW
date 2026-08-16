@@ -1,8 +1,8 @@
 const CONFIG = {
   appName: 'Harmonogram MOW',
-  backendVersion: '2026-06-22-calendar-resync',
+  backendVersion: '2026-08-16-audit-12.1.3',
   securityMode: 'token',
-  sourceEmail: 'dgorski5@wp.pl',
+  sourceEmail: 'harmonogram@example.com',
   calendarId: 'primary',
   defaultEducator: 'Dymek',
   calendarEducator: 'Dymek',
@@ -13,11 +13,15 @@ const CONFIG = {
   maxAttachmentsPerRun: 35,
   maxDocsPerWeek: 5,
   maxAlerts: 30,
+  storageChunkBytes: 7800,
+  processedMarkerRetentionDays: 90,
+  lockWaitMs: 5000,
   scanPastDays: 21,
   scanFutureDays: 35,
   infoCalendarLookbackDays: 60,
   infoCalendarLookaheadDays: 240,
   infoCalendarMaxThreads: 30,
+  infoCalendarMarkerRetentionDays: 400,
   dashboardWeekOffsets: [-7, 0, 7, 14],
   triggerMinutes: 30,
   aliases: {
@@ -40,7 +44,7 @@ function doGet(e) {
   const callback = params.callback || '';
   const transport = String(params.transport || params.format || '').toLowerCase();
   const educator = normalizeEducatorInput_(params.educator || CONFIG.defaultEducator);
-  const adminActions = { sync: true, scan: true, forceRescan: true, clearAllStoredWeeks: true, syncInfoCalendar: true, syncCalendar: true };
+  const adminActions = { sync: true, scan: true, forceRescan: true, syncInfoCalendar: true, syncCalendar: true };
   const requiredLevel = adminActions[action] ? 'admin' : 'view';
   const access = requireAccess_(params, requiredLevel);
 
@@ -74,14 +78,14 @@ function doGet(e) {
       return jsonOutput_(backendResponse_(dashboard, scanResult, { action: 'forceRescan', access: access }), callback, transport);
     }
 
-    if (action === 'syncInfoCalendar') {
-      const scanResult = { currentInfoCalendar: syncDirectorInfoToCalendar_() };
+  if (action === 'syncInfoCalendar') {
+      const scanResult = { currentInfoCalendar: withScriptLock_('synchronizacja terminów informacyjnych', syncDirectorInfoToCalendar_) };
       const dashboard = getDashboardData(educator);
       return jsonOutput_(backendResponse_(dashboard, scanResult, { action: 'syncInfoCalendar', access: access }), callback, transport);
     }
 
-    if (action === 'syncCalendar') {
-      const scanResult = { calendarSyncedWeeks: syncVisibleWeeksToCalendar_() };
+  if (action === 'syncCalendar') {
+      const scanResult = { calendarSyncedWeeks: withScriptLock_('synchronizacja Kalendarza Google', syncVisibleWeeksToCalendar_) };
       const dashboard = getDashboardData(educator);
       return jsonOutput_(backendResponse_(dashboard, scanResult, { action: 'syncCalendar', access: access }), callback, transport);
     }
@@ -93,7 +97,8 @@ function doGet(e) {
 
     return jsonOutput_({ ok: false, error: 'Nieznana akcja: ' + action, data: null, weeks: [], history: [], alerts: [] }, callback, transport);
   } catch (err) {
-    return jsonOutput_({ ok: false, error: err.message, stack: err.stack, data: null, weeks: [], history: [], alerts: [] }, callback, transport);
+    Logger.log('Błąd akcji web app "' + action + '": ' + (err.stack || err.message));
+    return jsonOutput_({ ok: false, error: err.message, data: null, weeks: [], history: [], alerts: [] }, callback, transport);
   }
 }
 
@@ -137,7 +142,7 @@ function clearSecurityTokens() {
   const props = PropertiesService.getScriptProperties();
   props.deleteProperty('VIEW_TOKEN');
   props.deleteProperty('ADMIN_TOKEN');
-  Logger.log('Usunięto VIEW_TOKEN i ADMIN_TOKEN. Backend będzie działał w trybie otwartym, dopóki nie uruchomisz setupSecurityTokens().');
+  Logger.log('Usunięto VIEW_TOKEN i ADMIN_TOKEN. Backend pozostanie zablokowany, dopóki nie uruchomisz setupSecurityTokens().');
 }
 
 function requireAccess_(params, level) {
@@ -145,8 +150,16 @@ function requireAccess_(params, level) {
   const token = String(params.token || params.viewToken || params.adminToken || '').trim();
   const publicInfo = getSecurityPublicInfo_({ level: level });
 
-  if (!security.enabled) {
+  if (security.mode === 'open') {
     return { ok: true, level: 'open', publicInfo: publicInfo };
+  }
+
+  if (!security.configured) {
+    return {
+      ok: false,
+      error: 'Ochrona tokenem jest włączona, ale tokeny nie zostały skonfigurowane. Uruchom setupSecurityTokens().',
+      publicInfo: publicInfo
+    };
   }
 
   if (security.adminToken && safeEqual_(token, security.adminToken)) {
@@ -171,7 +184,9 @@ function getSecurityConfig_() {
   const viewToken = String(props.getProperty('VIEW_TOKEN') || '').trim();
   const adminToken = String(props.getProperty('ADMIN_TOKEN') || '').trim();
   return {
-    enabled: Boolean(viewToken || adminToken),
+    mode: String(CONFIG.securityMode || 'token').toLowerCase(),
+    enabled: String(CONFIG.securityMode || 'token').toLowerCase() !== 'open',
+    configured: Boolean(viewToken && adminToken),
     viewToken: viewToken,
     adminToken: adminToken
   };
@@ -181,9 +196,12 @@ function getSecurityPublicInfo_(access) {
   const security = getSecurityConfig_();
   return {
     tokenProtectionEnabled: security.enabled,
+    tokenProtectionConfigured: security.configured,
     accessLevel: access && access.level ? access.level : '',
     calendarWritesOnlyFor: CONFIG.calendarEducator,
-    publicWarning: security.enabled ? '' : 'UWAGA: tokeny nie są ustawione. Backend jest otwarty dla osób znających adres /exec.'
+    publicWarning: security.mode === 'open'
+      ? 'UWAGA: backend działa w jawnym trybie otwartym.'
+      : (security.configured ? '' : 'Backend jest zablokowany do czasu uruchomienia setupSecurityTokens().')
   };
 }
 
@@ -209,32 +227,50 @@ function install() {
 }
 
 function forceRescan() {
-  clearProcessedMarkers_();
-  const result = scanAndSync();
-  Logger.log('FORCE RESCAN SUMMARY: threads=' + result.threads +
-    ', messages=' + result.messagesSeen +
-    ', seen=' + result.attachmentsSeen +
-    ', attempted=' + result.attachmentsAttempted +
-    ', processed=' + result.attachmentsProcessed +
-    ', ignored=' + result.attachmentsIgnored +
-    ', skippedWindow=' + result.attachmentsSkippedByWindow +
-    ', skippedLimit=' + result.attachmentsSkippedByLimit +
-    ', changedWeeks=' + result.changedWeeks.join(',') +
-    ', alerts=' + result.alertsCreated +
-    ', errors=' + result.errors.length);
-  return result;
+  return withScriptLock_('pełne ponowne skanowanie', function () {
+    clearProcessedMarkers_();
+    const result = scanAndSyncUnlocked_();
+    Logger.log('FORCE RESCAN SUMMARY: threads=' + result.threads +
+      ', messages=' + result.messagesSeen +
+      ', seen=' + result.attachmentsSeen +
+      ', attempted=' + result.attachmentsAttempted +
+      ', processed=' + result.attachmentsProcessed +
+      ', ignored=' + result.attachmentsIgnored +
+      ', skippedWindow=' + result.attachmentsSkippedByWindow +
+      ', skippedLimit=' + result.attachmentsSkippedByLimit +
+      ', changedWeeks=' + result.changedWeeks.join(',') +
+      ', alerts=' + result.alertsCreated +
+      ', errors=' + result.errors.length);
+    return result;
+  });
 }
 
 function scanAndSync() {
+  return withScriptLock_('synchronizacja', scanAndSyncUnlocked_);
+}
+
+function scanAndSyncUnlocked_() {
   const scanResult = scanMailbox_();
   scanResult.calendarSyncedWeeks = syncCalendarWeeks_(scanResult.changedWeeks.concat(getVisibleStoredWeekStarts_()));
   try {
     scanResult.currentInfoCalendar = syncDirectorInfoToCalendar_();
   } catch (err) {
     scanResult.currentInfoCalendarError = err.message;
-    Logger.log('BĹ‚Ä…d synchronizacji terminĂłw z wiadomoĹ›ci dyrektora: ' + err.message);
+    Logger.log('Błąd synchronizacji terminów z wiadomości dyrektora: ' + err.message);
   }
   return scanResult;
+}
+
+function withScriptLock_(label, callback) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(CONFIG.lockWaitMs)) {
+    throw new Error('Inna synchronizacja już trwa. Spróbuj ponownie za chwilę (' + label + ').');
+  }
+  try {
+    return callback();
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function syncVisibleWeeksToCalendar_() {
@@ -269,8 +305,11 @@ function getDashboardData(educator) {
   const who = normalizeEducatorInput_(educator || CONFIG.defaultEducator);
   const currentMonday = mondayOf_(new Date());
   const dashboardWeekStarts = getDashboardWeekStarts_(currentMonday);
+  const viewCache = {};
   const weeks = dashboardWeekStarts.map(function (weekStart) {
-    return buildWeekView_(weekStart, who);
+    const view = buildWeekView_(weekStart, who);
+    viewCache[weekStart] = view;
+    return view;
   });
   const changes = [].concat.apply([], weeks.map(function (week) { return week.changes || []; }));
   return {
@@ -285,7 +324,7 @@ function getDashboardData(educator) {
     dashboardWeekOffsets: CONFIG.dashboardWeekOffsets,
     dashboardWeekStarts: dashboardWeekStarts,
     weeks: weeks,
-    history: buildHistory_(who),
+    history: buildHistory_(who, viewCache),
     alerts: getAlerts_(),
     changes: changes,
     availableEducators: getAvailableEducators_()
@@ -306,7 +345,7 @@ function getDashboardWeekStarts_(currentMonday) {
 function getStoredWeekStarts_() {
   const props = PropertiesService.getScriptProperties().getProperties();
   return Object.keys(props)
-    .filter(function (key) { return key.indexOf('docs:') === 0; })
+    .filter(function (key) { return /^docs:\d{4}-\d{2}-\d{2}$/.test(key); })
     .map(function (key) { return key.replace('docs:', ''); })
     .sort();
 }
@@ -331,6 +370,7 @@ function scanMailbox_() {
   const ignored = [];
   const errors = [];
   const alerts = [];
+  pruneProcessedMarkers_();
 
   let messagesSeen = 0;
   let attachmentsSeen = 0;
@@ -371,9 +411,9 @@ function scanMailbox_() {
           attachmentsAttempted++;
           const bytes = attachment.getBytes();
           const digest = sha256_(bytes);
-          const key = ['processed', messageId, filename, size, digest].join(':');
+          const key = 'processed:' + sha256_([messageId, filename, size, digest].join('|'));
 
-          if (props.getProperty(key) === digest) {
+          if (props.getProperty(key)) {
             Logger.log('Pominięto już przetworzony załącznik: ' + filename);
             return;
           }
@@ -387,9 +427,8 @@ function scanMailbox_() {
             digest: digest
           });
 
-          props.setProperty(key, digest);
-
           if (!doc || doc.ignored) {
+            props.setProperty(key, new Date().toISOString());
             attachmentsIgnored++;
             const reason = doc && doc.reason ? doc.reason : 'nieznany powód';
             const msg = filename + ' | ' + reason;
@@ -399,12 +438,14 @@ function scanMailbox_() {
           }
 
           if (!isWeekInScanWindow_(doc.weekStart)) {
+            props.setProperty(key, new Date().toISOString());
             attachmentsSkippedByWindow++;
             Logger.log('SKIP WINDOW AFTER PARSE: ' + filename + ' | week=' + doc.weekStart);
             return;
           }
 
           const saveResult = saveScheduleDocument_(doc);
+          props.setProperty(key, new Date().toISOString());
           if (saveResult.changed) {
             changedWeeks[doc.weekStart] = true;
           }
@@ -462,6 +503,7 @@ function parseDocxAttachmentToScheduleDocument_(blob, source) {
       dateFrom: week.dateFrom,
       dateTo: week.dateTo,
       rawText: normalized,
+      educators: collectEducatorsFromText_(normalized),
       source: {
         messageId: source.messageId,
         subject: source.subject,
@@ -523,7 +565,6 @@ function scoreScheduleSource_(source, text) {
 }
 
 function saveScheduleDocument_(doc) {
-  const props = PropertiesService.getScriptProperties();
   const key = docsKey_(doc.weekStart);
   const oldDocs = getScheduleDocs_(doc.weekStart);
   const sameDigest = oldDocs.some(function (item) { return item.source && item.source.digest === doc.source.digest; });
@@ -531,7 +572,7 @@ function saveScheduleDocument_(doc) {
 
   const previousTop = oldDocs.length ? oldDocs.slice().sort(compareDocs_)[0] : null;
   const docs = oldDocs.concat([doc]).sort(compareDocs_).slice(0, CONFIG.maxDocsPerWeek);
-  props.setProperty(key, JSON.stringify(docs));
+  setLargeJsonProperty_(key, docs);
   pruneStoredDocs_();
 
   const newTop = docs[0];
@@ -549,17 +590,78 @@ function saveScheduleDocument_(doc) {
 }
 
 function getScheduleDocs_(weekStart) {
-  const raw = PropertiesService.getScriptProperties().getProperty(docsKey_(weekStart));
-  if (!raw) return [];
   try {
-    const docs = JSON.parse(raw);
+    const docs = getLargeJsonProperty_(docsKey_(weekStart));
     return Array.isArray(docs) ? docs : [];
   } catch (err) {
+    Logger.log('Nie udało się odczytać dokumentów tygodnia ' + weekStart + ': ' + err.message);
     return [];
   }
 }
 
 function docsKey_(weekStart) { return 'docs:' + weekStart; }
+
+function setLargeJsonProperty_(key, value) {
+  const props = PropertiesService.getScriptProperties();
+  const json = JSON.stringify(value);
+  const compressed = Utilities.gzip(Utilities.newBlob(json, 'application/json', 'payload.json'));
+  const encoded = Utilities.base64Encode(compressed.getBytes());
+  const generation = sha256_(json).slice(0, 16);
+  const chunks = [];
+  for (let offset = 0; offset < encoded.length; offset += CONFIG.storageChunkBytes) {
+    chunks.push(encoded.slice(offset, offset + CONFIG.storageChunkBytes));
+  }
+
+  chunks.forEach(function (chunk, index) {
+    props.setProperty(key + ':chunk:' + generation + ':' + index, chunk);
+  });
+
+  props.setProperty(key, JSON.stringify({
+    format: 'gzip-base64-chunks-v1',
+    generation: generation,
+    chunks: chunks.length,
+    checksum: sha256_(json),
+    updatedAt: new Date().toISOString()
+  }));
+
+  const activePrefix = key + ':chunk:' + generation + ':';
+  Object.keys(props.getProperties()).forEach(function (propertyKey) {
+    if (propertyKey.indexOf(key + ':chunk:') === 0 && propertyKey.indexOf(activePrefix) !== 0) {
+      props.deleteProperty(propertyKey);
+    }
+  });
+}
+
+function getLargeJsonProperty_(key) {
+  const props = PropertiesService.getScriptProperties();
+  const raw = props.getProperty(key);
+  if (!raw) return null;
+  const parsed = JSON.parse(raw);
+  if (!parsed || parsed.format !== 'gzip-base64-chunks-v1') return parsed;
+  if (!parsed.generation || !Number.isInteger(parsed.chunks) || parsed.chunks < 1) {
+    throw new Error('Nieprawidłowy manifest danych: ' + key);
+  }
+
+  let encoded = '';
+  for (let index = 0; index < parsed.chunks; index++) {
+    const chunk = props.getProperty(key + ':chunk:' + parsed.generation + ':' + index);
+    if (!chunk) throw new Error('Brak fragmentu ' + index + ' danych: ' + key);
+    encoded += chunk;
+  }
+  const blob = Utilities.newBlob(Utilities.base64Decode(encoded), 'application/gzip', 'payload.json.gz');
+  const json = Utilities.ungzip(blob).getDataAsString('UTF-8');
+  if (parsed.checksum && sha256_(json) !== parsed.checksum) {
+    throw new Error('Suma kontrolna danych nie zgadza się: ' + key);
+  }
+  return JSON.parse(json);
+}
+
+function deleteLargeJsonProperty_(key) {
+  const props = PropertiesService.getScriptProperties();
+  Object.keys(props.getProperties()).forEach(function (propertyKey) {
+    if (propertyKey === key || propertyKey.indexOf(key + ':chunk:') === 0) props.deleteProperty(propertyKey);
+  });
+}
 
 function compareDocs_(a, b) {
   const pa = a && a.source ? Number(a.source.priority || 0) : 0;
@@ -594,18 +696,15 @@ function createChangeAlert_(doc, previousTop) {
 
 function addAlert_(alert) {
   if (!alert || !alert.id) return;
-  const props = PropertiesService.getScriptProperties();
   const alerts = getAlerts_();
   if (alerts.some(function (item) { return item.id === alert.id; })) return;
   alerts.unshift(alert);
-  props.setProperty('alerts', JSON.stringify(alerts.slice(0, CONFIG.maxAlerts)));
+  setLargeJsonProperty_('alerts', alerts.slice(0, CONFIG.maxAlerts));
 }
 
 function getAlerts_() {
-  const raw = PropertiesService.getScriptProperties().getProperty('alerts');
-  if (!raw) return [];
   try {
-    const alerts = JSON.parse(raw);
+    const alerts = getLargeJsonProperty_('alerts');
     return Array.isArray(alerts) ? alerts.slice(0, CONFIG.maxAlerts) : [];
   } catch (err) {
     return [];
@@ -616,9 +715,9 @@ function pruneStoredDocs_() {
   const props = PropertiesService.getScriptProperties();
   const all = props.getProperties();
   Object.keys(all).forEach(function (key) {
-    if (key.indexOf('docs:') !== 0) return;
+    if (!/^docs:\d{4}-\d{2}-\d{2}$/.test(key)) return;
     const weekStart = key.replace('docs:', '');
-    if (!isWeekInScanWindow_(weekStart)) props.deleteProperty(key);
+    if (!isWeekInScanWindow_(weekStart)) deleteLargeJsonProperty_(key);
   });
 }
 
@@ -894,14 +993,6 @@ function timeToMinutes_(time) {
   return Number(time.hour || 0) * 60 + Number(time.minute || 0);
 }
 
-function timesTouch_(leftEnd, rightStart) {
-  if (!leftEnd || !rightStart) return false;
-  let endMinutes = timeToMinutes_(leftEnd);
-  const startMinutes = timeToMinutes_(rightStart);
-  if (endMinutes === 0 && startMinutes > 18 * 60) endMinutes = 24 * 60;
-  return Math.abs(endMinutes - startMinutes) <= 5;
-}
-
 function cleanReliefName_(name) {
   const cleaned = cleanupName_(name || '');
   if (!cleaned || /Łącz/i.test(cleaned) || /wolne/i.test(cleaned)) return '';
@@ -980,12 +1071,13 @@ function buildWeekView_(weekStart, educator) {
   };
 }
 
-function buildHistory_(educator) {
+function buildHistory_(educator, viewCache) {
   const who = normalizeEducatorInput_(educator || CONFIG.defaultEducator);
+  viewCache = viewCache || {};
   return getStoredWeekStarts_()
     .slice(-CONFIG.historyWeeks)
     .map(function (weekStart) {
-      const view = buildWeekView_(weekStart, who);
+      const view = viewCache[weekStart] || buildWeekView_(weekStart, who);
       return { weekNumber: view.weekNumber, weekStart: view.weekStart, weekEnd: view.weekEnd, range: view.range, totalHours: view.totalHours, overtimeHours: view.overtimeHours, weekendHours: view.weekendHours, weekendWorkDays: view.weekendWorkDays, sourceFilename: view.source, sourceKind: view.sourceInfo ? view.sourceInfo.kind : '', sourcePriority: view.sourceInfo ? view.sourceInfo.priority : '', updatedAt: view.updatedAt };
     });
 }
@@ -1056,14 +1148,12 @@ function summarizeDayShifts_(day) {
 }
 
 function getAvailableEducators_() {
-  const props = PropertiesService.getScriptProperties().getProperties();
   const names = {};
-  Object.keys(props).forEach(function (key) {
-    if (key.indexOf('docs:') !== 0) return;
-    let docs = [];
-    try { docs = JSON.parse(props[key]) || []; } catch (err) { docs = []; }
+  getStoredWeekStarts_().forEach(function (weekStart) {
+    const docs = getScheduleDocs_(weekStart);
     docs.forEach(function (doc) {
-      collectEducatorsFromText_(doc.rawText || '').forEach(function (name) { names[name] = true; });
+      const educators = Array.isArray(doc.educators) ? doc.educators : collectEducatorsFromText_(doc.rawText || '');
+      educators.forEach(function (name) { names[name] = true; });
     });
   });
   return Object.keys(names).sort(function (a, b) { return a.localeCompare(b, 'pl'); }).slice(0, 80);
@@ -1103,6 +1193,7 @@ function simplifyEducatorName_(name) {
 }
 
 function syncDirectorInfoToCalendar_() {
+  pruneTimestampedProperties_('infoCalendar:', CONFIG.infoCalendarMarkerRetentionDays);
   const query = ['from:' + CONFIG.sourceEmail, 'newer_than:' + CONFIG.infoCalendarLookbackDays + 'd'].join(' ');
   const threads = GmailApp.search(query, 0, CONFIG.infoCalendarMaxThreads);
   const minDate = addDays_(startOfDay_(new Date()), -7);
@@ -1141,7 +1232,7 @@ function syncDirectorInfoToCalendar_() {
     });
   });
 
-  Logger.log('Terminy z wiadomoĹ›ci dyrektora: scanned=' + scanned + ', candidates=' + candidates + ', inserted=' + inserted + ', skipped=' + skipped);
+  Logger.log('Terminy z wiadomości dyrektora: scanned=' + scanned + ', candidates=' + candidates + ', inserted=' + inserted + ', skipped=' + skipped);
   return { ok: true, scanned: scanned, candidates: candidates, inserted: inserted, skipped: skipped };
 }
 
@@ -1296,13 +1387,13 @@ function buildDirectorInfoTitle_(subject, context) {
   const cleanSubject = String(subject || '').replace(/\s+/g, ' ').trim();
   if (cleanSubject && cleanSubject.length >= 4) return cleanSubject.slice(0, 120);
   const cleanContext = String(context || '').replace(/\s+/g, ' ').trim();
-  return (cleanContext.slice(0, 100) || 'Termin z wiadomoĹ›ci dyrektora').replace(/[.:;,]+$/, '');
+  return (cleanContext.slice(0, 100) || 'Termin z wiadomości dyrektora').replace(/[.:;,]+$/, '');
 }
 
 function buildDirectorInfoCalendarEvent_(item, key, subject) {
   const description = [
-    'Automatycznie dodane z wiadomoĹ›ci dyrektora internatu.',
-    'Temat wiadomoĹ›ci: ' + (subject || ''),
+    'Automatycznie dodane z wiadomości dyrektora internatu.',
+    'Temat wiadomości: ' + (subject || ''),
     'Fragment: ' + (item.context || ''),
     'MOW_INFO_EVENT=1',
     'MOW_INFO_KEY=' + key
@@ -1383,29 +1474,80 @@ function syncWeekToCalendar_(weekStart) {
   const timeMax = addDays_(parseIsoDate_(weekStart), 8).toISOString();
   const markerWeek = 'HARMONOGRAM_WEEK=' + weekStart;
   const markerEducator = 'HARMONOGRAM_EDUCATOR=' + CONFIG.calendarEducator;
-  const existing = Calendar.Events.list(CONFIG.calendarId, { timeMin: timeMin, timeMax: timeMax, singleEvents: true, q: 'HARMONOGRAM_APP=1' });
-  let removed = 0;
-  (existing.items || []).forEach(function (event) {
+  const existingResponse = Calendar.Events.list(CONFIG.calendarId, { timeMin: timeMin, timeMax: timeMax, singleEvents: true, q: 'HARMONOGRAM_APP=1' });
+  const managedEvents = (existingResponse.items || []).filter(function (event) {
     const description = event.description || '';
-    if (description.indexOf(markerWeek) !== -1 && description.indexOf(markerEducator) !== -1) {
-      Calendar.Events.remove(CONFIG.calendarId, event.id);
-      removed++;
-    }
+    return description.indexOf(markerWeek) !== -1 && description.indexOf(markerEducator) !== -1;
+  });
+
+  const existingByKey = {};
+  const staleEvents = [];
+  managedEvents.forEach(function (event) {
+    const match = String(event.description || '').match(/HARMONOGRAM_SHIFT=([a-f0-9]+)/i);
+    if (!match || existingByKey[match[1]]) staleEvents.push(event);
+    else existingByKey[match[1]] = event;
   });
 
   let inserted = 0;
+  let updated = 0;
+  const desiredKeys = {};
   getCalendarShiftsForWeek_(view).forEach(function (shift) {
-      const event = {
-        summary: 'Praca MOW — ' + CONFIG.calendarEducator,
-        location: 'MOW',
-        description: ['Automatycznie dodane z aplikacji Harmonogram MOW.', 'Źródło: ' + (view.source || ''), 'Typ: ' + shift.label, 'HARMONOGRAM_APP=1', 'HARMONOGRAM_EDUCATOR=' + CONFIG.calendarEducator, 'HARMONOGRAM_WEEK=' + weekStart].join('\n'),
-        start: { dateTime: shift.startIso, timeZone: Session.getScriptTimeZone() },
-        end: { dateTime: shift.endIso, timeZone: Session.getScriptTimeZone() }
-      };
-      Calendar.Events.insert(event, CONFIG.calendarId);
-      inserted++;
+      const shiftKey = calendarShiftKey_(weekStart, shift);
+      desiredKeys[shiftKey] = true;
+      const desiredEvent = buildScheduleCalendarEvent_(view, weekStart, shift, shiftKey);
+      const existingEvent = existingByKey[shiftKey];
+      if (!existingEvent) {
+        Calendar.Events.insert(desiredEvent, CONFIG.calendarId);
+        inserted++;
+        return;
+      }
+      if (existingEvent.summary !== desiredEvent.summary || existingEvent.location !== desiredEvent.location || existingEvent.description !== desiredEvent.description) {
+        Calendar.Events.patch({ summary: desiredEvent.summary, location: desiredEvent.location, description: desiredEvent.description }, CONFIG.calendarId, existingEvent.id);
+        updated++;
+      }
   });
-  Logger.log('Kalendarz tydzień ' + weekStart + ': wychowawca=' + CONFIG.calendarEducator + ', usunięto=' + removed + ', dodano=' + inserted);
+
+  Object.keys(existingByKey).forEach(function (shiftKey) {
+    if (!desiredKeys[shiftKey]) staleEvents.push(existingByKey[shiftKey]);
+  });
+
+  let removed = 0;
+  staleEvents.forEach(function (event) {
+    Calendar.Events.remove(CONFIG.calendarId, event.id);
+    removed++;
+  });
+
+  Logger.log('Kalendarz tydzień ' + weekStart + ': wychowawca=' + CONFIG.calendarEducator + ', dodano=' + inserted + ', zaktualizowano=' + updated + ', usunięto=' + removed);
+  return { weekStart: weekStart, inserted: inserted, updated: updated, removed: removed, unchanged: Object.keys(desiredKeys).length - inserted - updated };
+}
+
+function calendarShiftKey_(weekStart, shift) {
+  return sha256_([
+    weekStart,
+    CONFIG.calendarEducator,
+    shift.startIso || '',
+    shift.endIso || '',
+    shift.type || '',
+    shift.label || ''
+  ].join('|')).slice(0, 32);
+}
+
+function buildScheduleCalendarEvent_(view, weekStart, shift, shiftKey) {
+  return {
+    summary: 'Praca MOW — ' + CONFIG.calendarEducator,
+    location: 'MOW',
+    description: [
+      'Automatycznie dodane z aplikacji Harmonogram MOW.',
+      'Źródło: ' + (view.source || ''),
+      'Typ: ' + shift.label,
+      'HARMONOGRAM_APP=1',
+      'HARMONOGRAM_EDUCATOR=' + CONFIG.calendarEducator,
+      'HARMONOGRAM_WEEK=' + weekStart,
+      'HARMONOGRAM_SHIFT=' + shiftKey
+    ].join('\n'),
+    start: { dateTime: shift.startIso, timeZone: Session.getScriptTimeZone() },
+    end: { dateTime: shift.endIso, timeZone: Session.getScriptTimeZone() }
+  };
 }
 
 function extractGroupBlocks_(text) {
@@ -1518,6 +1660,8 @@ function detectWeekFromSources_(sources, fallbackDate) {
         startMonth = endMonth - 1;
         if (startMonth < 1) { startMonth = 12; startYear = year - 1; }
       }
+      if (startMonthRaw && startMonth > endMonth) startYear = year - 1;
+      if (!isValidDateParts_(startYear, startMonth, startDay) || !isValidDateParts_(year, endMonth, endDay)) continue;
       const startDate = new Date(startYear, startMonth - 1, startDay);
       const endDate = new Date(year, endMonth - 1, endDay);
       const diffDays = Math.round((endDate.getTime() - startDate.getTime()) / 86400000);
@@ -1603,8 +1747,6 @@ function cleanupName_(name) {
     .trim();
 }
 
-function detectReplacingPerson_(shifts) { return shifts.length ? '–' : ''; }
-
 function dedupeShifts_(shifts) {
   const seen = {};
   const result = [];
@@ -1633,6 +1775,12 @@ function isValidDayMonth_(day, month) {
   return Number.isInteger(day) && Number.isInteger(month) && day >= 1 && day <= 31 && month >= 1 && month <= 12;
 }
 
+function isValidDateParts_(year, month, day) {
+  if (!Number.isInteger(year) || !isValidDayMonth_(day, month)) return false;
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+}
+
 function deleteExistingTriggers_(handlerName) {
   ScriptApp.getProjectTriggers().filter(function (trigger) { return trigger.getHandlerFunction() === handlerName; }).forEach(function (trigger) { ScriptApp.deleteTrigger(trigger); });
 }
@@ -1643,11 +1791,26 @@ function clearProcessedMarkers_() {
   Object.keys(all).forEach(function (key) { if (key.indexOf('processed:') === 0) props.deleteProperty(key); });
 }
 
+function pruneProcessedMarkers_() {
+  pruneTimestampedProperties_('processed:', CONFIG.processedMarkerRetentionDays);
+}
+
+function pruneTimestampedProperties_(prefix, retentionDays) {
+  const props = PropertiesService.getScriptProperties();
+  const all = props.getProperties();
+  const cutoff = Date.now() - Number(retentionDays || 0) * 86400000;
+  Object.keys(all).forEach(function (key) {
+    if (key.indexOf(prefix) !== 0) return;
+    const timestamp = Date.parse(all[key]);
+    if (!isFinite(timestamp) || timestamp < cutoff) props.deleteProperty(key);
+  });
+}
+
 function clearAllStoredWeeks() {
   const props = PropertiesService.getScriptProperties();
   const all = props.getProperties();
   Object.keys(all).forEach(function (key) {
-    if (key.indexOf('week:') === 0 || key.indexOf('docs:') === 0 || key.indexOf('processed:') === 0 || key === 'alerts') props.deleteProperty(key);
+    if (key.indexOf('week:') === 0 || key.indexOf('docs:') === 0 || key.indexOf('processed:') === 0 || key === 'alerts' || key.indexOf('alerts:chunk:') === 0) props.deleteProperty(key);
   });
   Logger.log('Usunięto zapisane dokumenty tygodni, stare tygodnie, alerty i znaczniki processed.');
 }

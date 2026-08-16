@@ -1,6 +1,8 @@
 {
-  "name": "Harmonogram MOW v12",
+  "id": "./",
+  "name": "Harmonogram MOW",
   "short_name": "Harmonogram",
+  "lang": "pl",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -12,7 +14,13 @@
       "src": "assets/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
     }
   ]
 }
