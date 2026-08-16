@@ -53,7 +53,7 @@ $('sampleBtn').addEventListener('click', loadSampleData);
 $('dashboardBtn').addEventListener('click', loadDashboardOnly);
 const testBackendBtn = $('testBackendBtn');
 if (testBackendBtn) testBackendBtn.addEventListener('click', testBackendConnection);
-$('saveSettingsBtn').addEventListener('click', saveSettings);
+$('saveSettingsBtn').addEventListener('click', () => saveSettings());
 $('clearCacheBtn').addEventListener('click', clearCache);
 $('exportBtn').addEventListener('click', exportHistoryCsv);
 $('notifyBtn').addEventListener('click', enableNotifications);
@@ -71,22 +71,52 @@ render();
 if (!state.weeks.length) loadSampleData(false);
 
 function loadState() {
-  const keys = [STORAGE_KEY].concat(LEGACY_STORAGE_KEYS || []);
+  const keys = [STORAGE_KEY, ...LEGACY_STORAGE_KEYS];
   for (const key of keys) {
     try {
       const raw = localStorage.getItem(key);
       if (!raw) continue;
       const parsed = JSON.parse(raw) || {};
-      const merged = { ...DEFAULT_STATE, ...parsed };
-      if (Array.isArray(merged.weeks)) merged.weeks = merged.weeks.sort(compareWeekLikeAsc);
-      if (Array.isArray(merged.history)) merged.history = sortHistoryRows(merged.history);
-      if (key !== STORAGE_KEY) localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
+      const merged = {
+        ...freshDefaultState(),
+        ...parsed,
+        weeks: Array.isArray(parsed.weeks) ? parsed.weeks.sort(compareWeekLikeAsc) : [],
+        history: Array.isArray(parsed.history) ? sortHistoryRows(parsed.history) : [],
+        alerts: Array.isArray(parsed.alerts) ? parsed.alerts : [],
+        changes: Array.isArray(parsed.changes) ? parsed.changes : [],
+        availableEducators: Array.isArray(parsed.availableEducators) ? parsed.availableEducators : [],
+        seenAlertIds: Array.isArray(parsed.seenAlertIds) ? parsed.seenAlertIds : []
+      };
+      if (key !== STORAGE_KEY) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+      }
+      LEGACY_STORAGE_KEYS.forEach(legacyKey => localStorage.removeItem(legacyKey));
       return merged;
     } catch {}
   }
-  return { ...DEFAULT_STATE };
+  return freshDefaultState();
 }
-function persist() { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+function freshDefaultState() {
+  return {
+    ...DEFAULT_STATE,
+    weeks: [],
+    history: [],
+    alerts: [],
+    changes: [],
+    availableEducators: [],
+    seenAlertIds: []
+  };
+}
+function persist() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    return true;
+  } catch (error) {
+    console.error('Nie udało się zapisać stanu aplikacji.', error);
+    return false;
+  }
+}
 function hydrateSettings() {
   $('backendUrl').value = state.backendUrl || '';
   $('viewToken').value = state.viewToken || '';
@@ -104,13 +134,26 @@ function normalizeBackendUrl(value) {
   if (!v) return '';
   v = v.replace(/\s+/g, '');
   v = v.replace(/\/dev(?:\?.*)?$/, '/exec');
-  const qIndex = v.indexOf('?');
-  if (qIndex !== -1) v = v.slice(0, qIndex);
-  return v;
+  const url = new URL(v);
+  if (url.protocol !== 'https:' || url.hostname !== 'script.google.com') {
+    throw new Error('Backend musi być adresem HTTPS w domenie script.google.com.');
+  }
+  if (!/\/macros\/s\/[^/]+\/exec$/.test(url.pathname)) {
+    throw new Error('Adres backendu musi być adresem wdrożenia Apps Script zakończonym /exec.');
+  }
+  url.search = '';
+  url.hash = '';
+  return url.toString();
 }
 
-function saveSettings() {
-  state.backendUrl = normalizeBackendUrl($('backendUrl').value.trim());
+function saveSettings(options = {}) {
+  try {
+    state.backendUrl = normalizeBackendUrl($('backendUrl').value.trim());
+  } catch (error) {
+    $('settingsPanel').classList.remove('hidden');
+    toast(error.message);
+    return false;
+  }
   state.viewToken = $('viewToken').value.trim();
   state.adminToken = $('adminToken').value.trim();
   state.layoutMode = $('layoutMode').value || 'auto';
@@ -118,10 +161,14 @@ function saveSettings() {
   state.dayFilter = $('dayFilter') ? ($('dayFilter').value || 'all') : 'all';
   state.educator = $('educator').value.trim() || 'Dymek';
   applyLayoutMode();
-  persist();
+  if (!persist()) {
+    toast('Nie udało się zapisać ustawień. Wyczyść dane aplikacji i spróbuj ponownie.');
+    return false;
+  }
   const mode = state.adminToken ? 'tryb administratora' : (state.viewToken ? 'tryb podglądu' : 'bez tokenu');
-  toast('Ustawienia zapisane. Widok: ' + state.educator + '. ' + mode + '. Kalendarz: tylko ' + (state.calendarEducator || 'Dymek') + '.');
+  if (!options.silent) toast('Ustawienia zapisane. Widok: ' + state.educator + '. ' + mode + '. Kalendarz: tylko ' + (state.calendarEducator || 'Dymek') + '.');
   render();
+  return true;
 }
 
 function applyLayoutMode() {
@@ -140,12 +187,20 @@ function backendUrlWithParams(action) {
   return url;
 }
 
-function clearCache() {
-  localStorage.removeItem(STORAGE_KEY);
-  state = { ...DEFAULT_STATE };
+async function clearCache() {
+  [STORAGE_KEY, ...LEGACY_STORAGE_KEYS].forEach(key => localStorage.removeItem(key));
+  try {
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.filter(key => key.startsWith('harmonogram-mow-')).map(key => caches.delete(key)));
+    }
+  } catch (error) {
+    console.warn('Nie udało się wyczyścić Cache Storage.', error);
+  }
+  state = freshDefaultState();
   hydrateSettings();
   render();
-  toast('Wyczyszczono lokalne dane.');
+  toast('Wyczyszczono lokalne dane i pamięć offline aplikacji.');
 }
 
 async function enableNotifications() {
@@ -155,19 +210,26 @@ async function enableNotifications() {
 }
 
 async function loadSampleData(showToast = true) {
-  const response = await fetch('./data/sample-weeks.json', { cache: 'no-store' });
-  const payload = await response.json();
-  applyPayload(payload);
-  if (showToast) toast('Załadowano dane testowe.');
+  try {
+    const response = await fetch('./data/sample-weeks.json', { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    applyPayload(payload);
+    if (showToast) toast('Załadowano dane testowe.');
+  } catch (error) {
+    toast('Nie udało się załadować danych testowych: ' + error.message);
+  }
 }
 
 async function refreshFromBackend() {
-  saveSettings();
+  if (!saveSettings({ silent: true })) return;
   if (!state.backendUrl) {
     toast('Najpierw wpisz adres backendu Apps Script w ustawieniach.');
     $('settingsPanel').classList.remove('hidden');
     return;
   }
+  const button = $('refreshBtn');
+  button.disabled = true;
   try {
     const action = state.adminToken ? 'sync' : 'dashboard';
     toast(state.adminToken ? 'Synchronizuję Gmail i Kalendarz…' : 'Pobieram widok z backendu bez zapisu do kalendarza…');
@@ -182,16 +244,20 @@ async function refreshFromBackend() {
     persist();
     render();
     toast(`Błąd backendu: ${error.message}`);
+  } finally {
+    button.disabled = false;
   }
 }
 
 async function loadDashboardOnly() {
-  saveSettings();
+  if (!saveSettings({ silent: true })) return;
   if (!state.backendUrl) {
     toast('Najpierw wpisz adres backendu Apps Script w ustawieniach.');
     $('settingsPanel').classList.remove('hidden');
     return;
   }
+  const button = $('dashboardBtn');
+  button.disabled = true;
   try {
     toast('Pobieram dane bez synchronizacji kalendarza…');
     const payload = await requestBackend(backendUrlWithParams('dashboard'));
@@ -199,7 +265,12 @@ async function loadDashboardOnly() {
     applyPayload(extractDashboard(payload));
     toast('Widok pobrany. Nic nie zapisano do Kalendarza Google.');
   } catch (error) {
+    state.backendError = error.message;
+    persist();
+    render();
     toast(`Błąd backendu: ${error.message}`);
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -229,11 +300,13 @@ function buildPublicTestUrl(url) {
 }
 
 async function testBackendConnection() {
-  saveSettings();
+  if (!saveSettings({ silent: true })) return;
   if (!state.backendUrl) {
     toast('Najpierw wpisz adres backendu /exec.');
     return;
   }
+  const button = $('testBackendBtn');
+  button.disabled = true;
   try {
     toast('Testuję backend Apps Script…');
     const payload = await requestBackend(backendUrlWithParams('ping'));
@@ -246,6 +319,8 @@ async function testBackendConnection() {
     persist();
     render();
     toast('Błąd testu backendu: ' + error.message);
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -354,7 +429,7 @@ function normalizeWeek(week) {
   });
   const totalHours = round(days.reduce((sum, day) => sum + day.hoursDay, 0));
   const weekendHours = round(days.filter(d => d.weekend).reduce((sum, day) => sum + day.hoursDay, 0));
-  return { ...week, days, summary: { totalHours, overtimeHours: Math.max(0, round(totalHours - 24)), weekendHours, weekendWorkDays: days.filter(d => d.weekend && d.hoursDay > 0).length, ...(week.summary || {}) } };
+  return { ...week, days, summary: { ...(week.summary || {}), totalHours, overtimeHours: Math.max(0, round(totalHours - 24)), weekendHours, weekendWorkDays: days.filter(d => d.weekend && d.hoursDay > 0).length } };
 }
 
 function normalizeShift(shift) {
@@ -529,13 +604,13 @@ function renderDay(day) {
   const warnings = (day.warnings || []).map(w => `<div class="day-warning">${escapeHtml(w)}</div>`).join('');
   const changes = (day.changes || []).map(change => `<div class="day-change"><strong>Zmiana:</strong> ${escapeHtml(change.message || change)}</div>`).join('');
   const flags = `${day.hasChange ? '<span class="badge change-badge">Zmiana</span>' : ''}${(day.warnings || []).length ? '<span class="badge warn-badge">Uwaga</span>' : ''}`;
-  return `<article class="day-card ${day.weekend ? 'weekend' : ''} ${day.hasChange ? 'changed' : ''}"><div class="day-top"><div><div class="day-name">${day.name}</div><div class="day-flags">${flags}</div></div><div class="day-date">${day.date}</div></div>${warnings}${changes}${shifts}<div class="day-total"><span>Razem: ${numberOr(day.hoursDay, 0)} h</span>${day.zmienia && day.zmienia !== '–' ? `<span class="total-right">Zmienia mnie: ${escapeHtml(day.zmienia)}</span>` : ''}</div></article>`;
+  return `<article class="day-card ${day.weekend ? 'weekend' : ''} ${day.hasChange ? 'changed' : ''}"><div class="day-top"><div><div class="day-name">${escapeHtml(day.name)}</div><div class="day-flags">${flags}</div></div><div class="day-date">${escapeHtml(day.date)}</div></div>${warnings}${changes}${shifts}<div class="day-total"><span>Razem: ${numberOr(day.hoursDay, 0)} h</span>${day.zmienia && day.zmienia !== '–' ? `<span class="total-right">Zmienia mnie: ${escapeHtml(day.zmienia)}</span>` : ''}</div></article>`;
 }
 
 function renderShift(shift) {
   const replaces = shift.replacesPerson || shift.zmieniam || '';
   const replacedBy = shift.replacedByPerson || shift.zmienia || '';
-  return `<div class="shift ${escapeHtml(shift.type)}"><div class="shift-line"><span class="label">${escapeHtml(shift.label)}</span>${replaces ? `<span class="relief-right">Zmieniam: ${escapeHtml(replaces)}</span>` : ''}</div><strong class="hours">${escapeHtml(shift.hours)}</strong><div class="shift-meta-row"><span class="meta">${numberOr(shift.duration, 0)} h</span>${replacedBy ? `<span class="relief-right">Zmienia mnie: ${escapeHtml(replacedBy)}</span>` : ''}</div></div>`;
+  return `<div class="shift ${shiftClassName(shift.type)}"><div class="shift-line"><span class="label">${escapeHtml(shift.label)}</span>${replaces ? `<span class="relief-right">Zmieniam: ${escapeHtml(replaces)}</span>` : ''}</div><strong class="hours">${escapeHtml(shift.hours)}</strong><div class="shift-meta-row"><span class="meta">${numberOr(shift.duration, 0)} h</span>${replacedBy ? `<span class="relief-right">Zmienia mnie: ${escapeHtml(replacedBy)}</span>` : ''}</div></div>`;
 }
 
 function renderHistory() {
@@ -561,7 +636,7 @@ function exportHistoryCsv() {
 function renderTodayCard() {
   const target = $('todayView');
   if (!target) return;
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = toLocalIsoDate(new Date());
   const allDays = (state.weeks || []).flatMap(week => (week.days || []).map(day => ({ ...day, weekRange: week.range })));
   const today = allDays.find(day => day.isoDate === todayIso);
   const future = allDays.filter(day => day.isoDate >= todayIso && (day.shifts || []).length).sort((a, b) => String(a.isoDate).localeCompare(String(b.isoDate)))[0];
@@ -617,7 +692,6 @@ function collectChangesFromWeeks(weeks) {
 }
 
 function printCurrentWeekPdf() {
-  document.body.classList.add('print-week');
   setTimeout(() => window.print(), 50);
 }
 
@@ -670,26 +744,37 @@ function parseLocalDate(value = '', fallbackYear = new Date().getFullYear()) {
   const text = String(value || '').trim();
   if (!text) return null;
   const iso = text.match(/(\d{4})-(\d{2})-(\d{2})/);
-  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+  if (iso) {
+    const date = new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+    return isSameLocalDate(date, Number(iso[1]), Number(iso[2]), Number(iso[3])) ? date : null;
+  }
   const dotted = text.match(/(\d{1,2})[.\-/](\d{1,2})(?:[.\-/](\d{2,4}))?/);
   if (!dotted) return null;
   const rawYear = dotted[3] ? Number(dotted[3]) : fallbackYear;
   const year = rawYear < 100 ? 2000 + rawYear : rawYear;
   const date = new Date(year, Number(dotted[2]) - 1, Number(dotted[1]));
-  return Number.isNaN(date.getTime()) ? null : date;
+  return isSameLocalDate(date, year, Number(dotted[2]), Number(dotted[1])) ? date : null;
 }
+function isSameLocalDate(date, year, month, day) { return !Number.isNaN(date.getTime()) && date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day; }
 function startOfLocalDay(date) { return new Date(date.getFullYear(), date.getMonth(), date.getDate()); }
 function parseHoursLabel(label) { const match = String(label).match(/(\d{1,2}:\d{2})\s*[–-]\s*(\d{1,2}:\d{2})/); if (!match) return { hours: label, start: '', end: '', duration: 0 }; const duration = durationHours(match[1], match[2]); return { hours: `${match[1]}–${match[2]}`, start: match[1], end: match[2], duration }; }
 function durationHours(start, end) { const [sh, sm] = start.split(':').map(Number); const [eh, em] = end.split(':').map(Number); let minutes = (eh * 60 + em) - (sh * 60 + sm); if (minutes <= 0) minutes += 24 * 60; return round(minutes / 60); }
-function addDaysIso(iso, offset) { const date = new Date(`${iso}T00:00:00`); date.setDate(date.getDate() + offset); return date.toISOString().slice(0, 10); }
+function addDaysIso(iso, offset) { const date = parseLocalDate(iso); if (!date) return ''; date.setDate(date.getDate() + offset); return toLocalIsoDate(date); }
 function formatShortDate(iso) { const [y, m, d] = String(iso || '').split('-'); return d && m ? `${d}.${m}` : ''; }
-function formatDateTime(iso) { return new Intl.DateTimeFormat('pl-PL', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(iso)); }
+function formatDateTime(iso) { const date = new Date(iso); return Number.isNaN(date.getTime()) ? 'brak danych' : new Intl.DateTimeFormat('pl-PL', { dateStyle: 'short', timeStyle: 'short' }).format(date); }
 function numberOr(value, fallback) { const n = Number(value); return Number.isFinite(n) ? round(n) : fallback; }
 function round(value) { return Math.round((Number(value) + Number.EPSILON) * 100) / 100; }
 function firstNonEmpty(items) { for (const value of items || []) { const text = String(value || '').trim(); if (text && text !== '–') return text; } return ''; }
 function lastNonEmpty(items) { for (let i = (items || []).length - 1; i >= 0; i--) { const text = String(items[i] || '').trim(); if (text && text !== '–') return text; } return ''; }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function slug(value) { return String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'wychowawca'; }
+function shiftClassName(value) { const allowed = ['dyzur', 'noc', 'vi', 'zast', 'wakacje']; const normalized = slug(value); return allowed.includes(normalized) ? normalized : 'dyzur'; }
+function toLocalIsoDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 function iframeBridge(baseUrl) {
   return new Promise((resolve, reject) => {
     const url = new URL(baseUrl);
@@ -719,6 +804,7 @@ function iframeBridge(baseUrl) {
     }
 
     function onMessage(event) {
+      if (event.source !== iframe.contentWindow) return;
       const data = event.data;
       if (!data || data.source !== 'harmonogram-mow-backend') return;
       completed = true;
@@ -747,7 +833,6 @@ function jsonp(baseUrl) {
     url.searchParams.set('format', 'jsonp');
     const script = document.createElement('script');
     let completed = false;
-    let loaded = false;
     const timer = setTimeout(() => {
       cleanup();
       reject(new Error('brak odpowiedzi JSONP z Apps Script. Najczęściej wdrożenie nie ma dostępu „Każdy” albo telefon używa starej wersji PWA'));
@@ -768,7 +853,6 @@ function jsonp(baseUrl) {
       reject(new Error('nie udało się załadować odpowiedzi Apps Script jako JSONP. Aplikacja używa mostu iframe/postMessage; adres musi kończyć się na /exec, wdrożenie musi być najnowszą wersją i telefon nie może trzymać starego cache'));
     };
     script.onload = () => {
-      loaded = true;
       setTimeout(() => {
         if (!completed) {
           cleanup();

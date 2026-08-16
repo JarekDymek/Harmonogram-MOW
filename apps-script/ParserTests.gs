@@ -5,6 +5,10 @@ function runParserTests() {
   assertEqual_(week.weekStart, '2026-06-08', 'weekStart');
   assertEqual_(week.weekEnd, '2026-06-14', 'weekEnd');
 
+  const yearBoundaryWeek = detectWeek_('Grafik 30.12-05.01.2027.docx', 'Grafik internatu', '', new Date(2026, 11, 20));
+  assertEqual_(yearBoundaryWeek.weekStart, '2026-12-28', 'year boundary weekStart');
+  assertEqual_(yearBoundaryWeek.weekEnd, '2027-01-03', 'year boundary weekEnd');
+
   const t1 = parseTimeToken_('700');
   assertEqual_(t1.hour, 7, '700 hour');
   assertEqual_(t1.minute, 0, '700 minute');
@@ -17,29 +21,30 @@ function runParserTests() {
 
   const sample = [
     'INTERNAT', '08 - 14.06.2026r.', '41.', 'VI', 'IIIbr',
-    '600- 800 Dembiński', '1430- 2200 Dymek',
-    '600-800 Kowalska', '1330- 1530 Górski', '1530 - 1930 Kowalska', '1930- 2200 Dembiński',
-    '600- 800 Dymek', '1300- 1900 Dembiński', '1900-2200 Kowalska',
-    '600- 800 Dymek', '1300-1400 Chlebowski', '1400- 2200 Dymek',
-    '600- 1400 Kowalska', '1400- 2200 Dembiński',
-    '600- 800 Łącz z V', '800- 1600 Kowalska', '1600- 2200 Dymek',
-    '600-800 Łącz z V', '800- 1400 Kowalska', '1400- 2200 Dembiński',
-    '1.Dembiński – 32,5', '2.Kowalska – 31', '3.Dymek –33,5',
-    'VII', '6 A', '600-800 Polkowski', '1230 - 2200 Polkowski',
-    'NOC', '2400-600 Dembiński', '2200-600 Stankiewicz', '2200-600 Dymek', '2200-600 Piłat', '2200-600 Ochałek', '2200-600 Worożański', '2200-600 Świderski'
+    '600- 800 Osoba Pierwsza', '1430- 2200 Osoba Testowa',
+    '600-800 Osoba Druga', '1330- 1530 Osoba Trzecia', '1530 - 1930 Osoba Druga', '1930- 2200 Osoba Pierwsza',
+    '600- 800 Osoba Testowa', '1300- 1900 Osoba Pierwsza', '1900-2200 Osoba Druga',
+    '600- 800 Osoba Testowa', '1300-1400 Osoba Czwarta', '1400- 2200 Osoba Testowa',
+    '600- 1400 Osoba Druga', '1400- 2200 Osoba Pierwsza',
+    '600- 800 Łącz z V', '800- 1600 Osoba Druga', '1600- 2200 Osoba Testowa',
+    '600-800 Łącz z V', '800- 1400 Osoba Druga', '1400- 2200 Osoba Pierwsza',
+    '1.Osoba Pierwsza – 32,5', '2.Osoba Druga – 31', '3.Osoba Testowa –33,5',
+    'VII', '6 A', '600-800 Osoba Piąta', '1230 - 2200 Osoba Piąta',
+    'NOC', '2400-600 Osoba Pierwsza', '2200-600 Nocny Pierwszy', '2200-600 Osoba Testowa', '2200-600 Nocny Drugi', '2200-600 Nocny Trzeci', '2200-600 Nocny Czwarty', '2200-600 Nocny Piąty'
   ].join('\n');
 
-  const parsedDymek = parseInternatSchedule_(sample, '2026-06-08', 'Dymek');
-  assertEqual_(parsedDymek.days[0].hoursDay, 7.5, 'Dymek PON hours');
-  assertEqual_(parsedDymek.days[2].hoursDay, 10, 'Dymek ŚR hours');
-  assertEqual_(parsedDymek.days[3].hoursDay, 10, 'Dymek CZW hours');
-  assertEqual_(parsedDymek.days[5].hoursDay, 6, 'Dymek SOB hours');
-  assertEqual_(parsedDymek.days[0].shifts[0].replacesPerson, 'Dembiński', 'Dymek PON zmieniam');
-  assertEqual_(parsedDymek.days[2].shifts[0].replacedByPerson, 'Dembiński', 'Dymek ŚR zmienia mnie');
-  assertEqual_(parsedDymek.days[3].shifts[1].replacesPerson, 'Chlebowski', 'Dymek CZW druga zmiana zmieniam');
-  assertEqual_(parsedDymek.days[5].shifts[0].replacesPerson, 'Kowalska', 'Dymek SOB zmieniam');
+  const parsedTestPerson = parseInternatSchedule_(sample, '2026-06-08', 'Osoba Testowa');
+  assertEqual_(parsedTestPerson.days[0].hoursDay, 7.5, 'osoba testowa PON hours');
+  assertEqual_(parsedTestPerson.days[2].hoursDay, 4, 'osoba testowa ŚR hours z początkiem nocy');
+  assertEqual_(parsedTestPerson.days[3].hoursDay, 16, 'osoba testowa CZW hours z końcem nocy');
+  assertEqual_(parsedTestPerson.days[5].hoursDay, 6, 'osoba testowa SOB hours');
+  assertEqual_(parsedTestPerson.days[0].shifts[0].replacesPerson, 'Osoba Pierwsza', 'osoba testowa PON zmieniam');
+  assertEqual_(parsedTestPerson.days[2].shifts[0].replacedByPerson, 'Osoba Pierwsza', 'osoba testowa ŚR zmienia mnie');
+  const thursdayLateShift = parsedTestPerson.days[3].shifts.filter(function (shift) { return shift.start === '14:00'; })[0];
+  assertEqual_(thursdayLateShift.replacesPerson, 'Osoba Czwarta', 'osoba testowa CZW zmiana 14:00 zmieniam');
+  assertEqual_(parsedTestPerson.days[5].shifts[0].replacesPerson, 'Osoba Druga', 'osoba testowa SOB zmieniam');
 
-  const parsedKowalska = parseInternatSchedule_(sample, '2026-06-08', 'Kowalska');
+  const parsedSecondPerson = parseInternatSchedule_(sample, '2026-06-08', 'Osoba Druga');
   const nightDays = makeEmptyDays_('2026-06-29');
   addShiftToDays_(nightDays, buildShift_('2026-06-29', 2, parseTimeToken_('22:00'), parseTimeToken_('06:00'), 'noc', 'Noc'));
   const calendarParts = getCalendarShiftsForWeek_({ days: nightDays });
@@ -48,12 +53,12 @@ function runParserTests() {
   assertEqual_(calendarParts[0].end, '24:00', 'night first end');
   assertEqual_(calendarParts[1].start, '00:00', 'night second start');
   assertEqual_(calendarParts[1].end, '06:00', 'night second end');
-  assertEqual_(parsedKowalska.days[1].hoursDay, 6, 'Kowalska WT hours');
-  assertEqual_(parsedKowalska.days[2].hoursDay, 3, 'Kowalska ŚR hours');
-  assertEqual_(parsedKowalska.days[4].hoursDay, 8, 'Kowalska PT hours');
-  assertEqual_(parsedKowalska.days[5].hoursDay, 8, 'Kowalska SOB hours');
+  assertEqual_(parsedSecondPerson.days[1].hoursDay, 6, 'osoba druga WT hours');
+  assertEqual_(parsedSecondPerson.days[2].hoursDay, 3, 'osoba druga ŚR hours');
+  assertEqual_(parsedSecondPerson.days[4].hoursDay, 8, 'osoba druga PT hours');
+  assertEqual_(parsedSecondPerson.days[5].hoursDay, 8, 'osoba druga SOB hours');
 
-  Logger.log('Parser tests OK — v11');
+  Logger.log('Parser tests OK');
 }
 
 function assertEqual_(actual, expected, label) {
