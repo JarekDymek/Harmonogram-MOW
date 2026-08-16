@@ -42,7 +42,7 @@ await test('funkcje dat, URL i normalizacji frontendu', () => {
   const app = read('assets/app.js');
   const start = app.indexOf('function normalizeBackendUrl');
   assert.ok(start > 0, 'Nie znaleziono funkcji frontendu do testów');
-  const context = vm.createContext({ URL, Intl, Date, console, setTimeout, clearTimeout, Blob });
+  const context = vm.createContext({ URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 8 });
   new vm.Script(`${app.slice(start)}\n    globalThis.frontend = { normalizeBackendUrl, parseLocalDate, addDaysIso, durationHours, normalizeWeek, escapeHtml, formatDateTime, toLocalIsoDate };`
   ).runInContext(context);
   const api = context.frontend;
@@ -61,6 +61,33 @@ await test('funkcje dat, URL i normalizacji frontendu', () => {
     days: [{ hoursDay: 2, shifts: [] }]
   });
   assert.equal(normalized.summary.totalHours, 2, 'Wyliczona suma godzin musi być nadrzędna wobec starego podsumowania');
+});
+
+await test('pełny plan grupuje dyżury i zachowuje aktualny cache', () => {
+  const app = read('assets/app.js');
+  const start = app.indexOf('function normalizeBackendUrl');
+  const context = vm.createContext({ URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 8 });
+  new vm.Script(`${app.slice(start)}\n    globalThis.internatUi = { getInternatShiftGroup, groupInternatShifts, mergeInternatWeekCache };`
+  ).runInContext(context);
+  const api = context.internatUi;
+
+  assert.equal(api.getInternatShiftGroup({ label: 'Zast. Gr. VIII', type: 'zast' }).label, 'Grupa 8');
+  assert.equal(api.getInternatShiftGroup({ label: 'Grupa B', type: 'wakacje' }).key, 'vacation-b');
+  assert.equal(api.getInternatShiftGroup({ label: 'Noc', type: 'noc' }).key, 'night');
+  const grouped = api.groupInternatShifts([
+    { label: 'Gr. VI', type: 'vi', duration: 6 },
+    { label: 'Gr. VI', type: 'vi', duration: 4 },
+    { label: 'Noc', type: 'noc', duration: 6 }
+  ]);
+  assert.equal(grouped.length, 2);
+  assert.equal(grouped[0].label, 'Grupa 6');
+  assert.equal(grouped[0].hours, 10);
+
+  const cached = { '2026-08-10': { weekStart: '2026-08-10', sourceVersion: 'abc', days: [] } };
+  const retained = api.mergeInternatWeekCache(cached, {}, [{ weekStart: '2026-08-10', sourceVersion: 'abc' }], false);
+  assert.ok(retained['2026-08-10'], 'Dashboard nie może usuwać aktualnego planu internatu z cache');
+  const invalidated = api.mergeInternatWeekCache(cached, {}, [{ weekStart: '2026-08-10', sourceVersion: 'nowa-wersja' }], false);
+  assert.equal(invalidated['2026-08-10'], undefined, 'Nowa wersja źródła musi unieważnić stary cache');
 });
 
 class MockBlob {
@@ -159,6 +186,7 @@ await test('pełny plan internatu łączy dyżury wszystkich osób dla tygodnia'
   new vm.Script("globalThis.fullInternatWeek = buildInternatWeekFromDocs_('2026-06-08', testDocs);").runInContext(runtime.context);
   assert.equal(runtime.context.fullInternatWeek.staffCount, 2);
   assert.equal(runtime.context.fullInternatWeek.shiftCount, 4);
+  assert.ok(runtime.context.fullInternatWeek.sourceVersion, 'Pełny tydzień powinien zawierać wersję źródła dla cache');
   assert.equal(runtime.context.fullInternatWeek.days[0].shifts.length, 2);
   assert.equal(runtime.context.fullInternatWeek.days[1].shifts.length, 2);
   assert.deepEqual(Array.from(runtime.context.fullInternatWeek.staff), ['Druga', 'Pierwsza']);
@@ -217,20 +245,22 @@ await test('synchronizacja kalendarza jest idempotentna i nie usuwa przed wstawi
   assert.equal(runtime.context.secondSync.unchanged, 1);
 });
 
-await test('interfejs 12.2 ma jedno menu, auto-synchronizację i wersjonowane zasoby', () => {
+await test('interfejs 12.3 ma jedno menu, auto-synchronizację i wersjonowane zasoby', () => {
   const html = read('index.html');
   const app = read('assets/app.js');
   const worker = read('service-worker.js');
   const sample = JSON.parse(read('data/sample-weeks.json'));
   const packageData = JSON.parse(read('package.json'));
-  assert.equal(packageData.version, '12.2.0');
+  assert.equal(packageData.version, '12.3.0');
   assert.equal((html.match(/id="actionsMenu"/g) || []).length, 1);
   assert.match(html, /<option value="internat">Cały internat<\/option>/);
-  assert.match(html, /assets\/app\.js\?v=12\.2\.0/);
-  assert.match(html, /assets\/styles\.css\?v=12\.2\.0/);
+  assert.match(html, /assets\/app\.js\?v=12\.3\.0/);
+  assert.match(html, /assets\/styles\.css\?v=12\.3\.0/);
   assert.match(app, /autoRefreshFromBackend\('start'\)/);
   assert.match(app, /state\.adminToken \? 'sync' : 'dashboard'/);
-  assert.match(worker, /APP_VERSION = '12\.2\.0'/);
+  assert.match(worker, /APP_VERSION = '12\.3\.0'/);
+  assert.match(app, /<details class="internat-day/);
+  assert.match(app, /<details class="internat-group/);
   assert.ok(sample.internatWeeks?.['2026-06-08'], 'Brak demonstracyjnego planu całego internatu');
 });
 

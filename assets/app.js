@@ -1,6 +1,7 @@
-const APP_VERSION = '12.2.0';
+const APP_VERSION = '12.3.0';
 const STORAGE_KEY = 'harmonogram-mow-state-v12';
 const LEGACY_STORAGE_KEYS = ['harmonogram-mow-state-v11', 'harmonogram-mow-state-v10', 'harmonogram-mow-state-v9', 'harmonogram-mow-state-v8'];
+const MAX_INTERNAT_CACHE_WEEKS = 8;
 const DEFAULT_STATE = {
   backendUrl: '',
   viewToken: '',
@@ -514,7 +515,7 @@ function applyPayload(payload) {
   state.history = normalized.history;
   state.alerts = incomingAlerts;
   state.changes = normalized.changes || collectChangesFromWeeks(normalized.weeks);
-  state.internatWeeks = normalized.internatWeeks || {};
+  state.internatWeeks = mergeInternatWeekCache(state.internatWeeks, normalized.internatWeeks, normalized.weeks, normalized.hasInternatWeeks);
   state.availableEducators = normalized.availableEducators || state.availableEducators || [];
   state.lastSync = normalized.updatedAt || new Date().toISOString();
   state.educator = normalized.educator || state.educator || 'Dymek';
@@ -536,8 +537,29 @@ function normalizePayload(payload) {
   const cleanSource = repairMojibake(source || {});
   const weeks = (cleanSource.weeks || []).map(normalizeWeek).sort(compareWeekLikeAsc);
   const history = sortHistoryRows(cleanSource.history && cleanSource.history.length ? cleanSource.history : weeks.map(weekToHistoryRow));
+  const hasInternatWeeks = Object.prototype.hasOwnProperty.call(cleanSource, 'internatWeeks');
   const internatWeeks = Object.fromEntries(Object.entries(cleanSource.internatWeeks || {}).map(([weekStart, week]) => [weekStart, normalizeInternatWeek(week)]));
-  return { weeks, history, alerts: cleanSource.alerts || [], changes: cleanSource.changes || collectChangesFromWeeks(weeks), internatWeeks, availableEducators: cleanSource.availableEducators || [], updatedAt: cleanSource.updatedAt || cleanSource.generatedAt, educator: cleanSource.educator, calendarEducator: cleanSource.calendarEducator, security: cleanSource.security || {} };
+  return { weeks, history, alerts: cleanSource.alerts || [], changes: cleanSource.changes || collectChangesFromWeeks(weeks), internatWeeks, hasInternatWeeks, availableEducators: cleanSource.availableEducators || [], updatedAt: cleanSource.updatedAt || cleanSource.generatedAt, educator: cleanSource.educator, calendarEducator: cleanSource.calendarEducator, security: cleanSource.security || {} };
+}
+
+function mergeInternatWeekCache(existing = {}, incoming = {}, weeks = [], hasIncoming = false) {
+  const merged = {
+    ...(existing && typeof existing === 'object' && !Array.isArray(existing) ? existing : {}),
+    ...(hasIncoming && incoming && typeof incoming === 'object' && !Array.isArray(incoming) ? incoming : {})
+  };
+
+  (weeks || []).forEach(week => {
+    const weekStart = getWeekCacheKey(week);
+    const cached = weekStart ? merged[weekStart] : null;
+    if (!cached) return;
+    const expectedVersion = String(week.sourceVersion || '');
+    const cachedVersion = String(cached.sourceVersion || '');
+    if (expectedVersion && expectedVersion !== cachedVersion) delete merged[weekStart];
+  });
+
+  return Object.fromEntries(Object.entries(merged)
+    .sort(([left], [right]) => String(left).localeCompare(String(right)))
+    .slice(-MAX_INTERNAT_CACHE_WEEKS));
 }
 
 function repairMojibake(value) {
@@ -638,6 +660,9 @@ function normalizeShift(shift) {
     end: shift.end || parsed.end,
     duration: numberOr(shift.duration, shift.hoursValue || parsed.duration),
     sourceGroup: shift.sourceGroup || shift.label || '',
+    groupKey: shift.groupKey || '',
+    groupLabel: shift.groupLabel || '',
+    groupOrder: numberOr(shift.groupOrder, 0),
     replacesPerson: shift.replacesPerson || shift.zmieniam || shift.replaces || shift.previousPerson || '',
     replacedByPerson: shift.replacedByPerson || shift.zmienia || shift.replacedBy || shift.nextPerson || '',
     zmieniam: shift.zmieniam || shift.replacesPerson || '',
@@ -878,14 +903,85 @@ function renderInternatWeek(selectedWeek) {
 }
 
 function renderInternatDay(day) {
-  const shifts = (day.shifts || []).map(shift => {
-    const relation = [
-      shift.replacesPerson ? `zmienia: ${shift.replacesPerson}` : '',
-      shift.replacedByPerson ? `przekazuje: ${shift.replacedByPerson}` : ''
-    ].filter(Boolean).join(' • ');
-    return `<div class="internat-shift ${shiftClassName(shift.type)}"><strong class="internat-hours">${escapeHtml(shift.hours)}</strong><div class="internat-person"><strong>${escapeHtml(shift.educator)}</strong><span>${escapeHtml(shift.label || 'Dyżur')}${relation ? ` • ${escapeHtml(relation)}` : ''}</span></div></div>`;
-  }).join('') || '<p class="empty">Brak dyżurów.</p>';
-  return `<article class="internat-day ${day.weekend ? 'weekend' : ''}"><header><div><strong>${escapeHtml(day.name)}</strong><span>${escapeHtml(day.date)}</span></div><span>${numberOr(day.hoursDay, 0)} h łącznie</span></header><div class="internat-shift-list">${shifts}</div></article>`;
+  const groups = groupInternatShifts(day.shifts || []);
+  const shiftCount = (day.shifts || []).length;
+  const isToday = day.isoDate === toLocalIsoDate(new Date());
+  const groupPanels = groups.map(group => {
+    const shifts = group.shifts.map(renderInternatShift).join('') || '<p class="empty">Brak dyżurów.</p>';
+    return `<details class="internat-group"><summary><div><strong>${escapeHtml(group.label)}</strong><span>${formatDutyCount(group.shifts.length)}</span></div><span>${numberOr(group.hours, 0)} h</span></summary><div class="internat-shift-list">${shifts}</div></details>`;
+  }).join('') || '<p class="empty internat-day-empty">Brak dyżurów.</p>';
+  return `<details class="internat-day ${day.weekend ? 'weekend' : ''}"${isToday ? ' open' : ''}><summary><div class="internat-day-title"><strong>${escapeHtml(day.name)}</strong><span>${escapeHtml(day.date)}</span></div><div class="internat-day-stats"><span>${escapeHtml(formatInternatSectionSummary(groups))}</span><span>${formatDutyCount(shiftCount)}</span><strong>${numberOr(day.hoursDay, 0)} h</strong></div></summary><div class="internat-day-body">${groupPanels}</div></details>`;
+}
+
+function renderInternatShift(shift) {
+  const relation = [
+    shift.replacesPerson ? `zmienia: ${shift.replacesPerson}` : '',
+    shift.replacedByPerson ? `przekazuje: ${shift.replacedByPerson}` : ''
+  ].filter(Boolean).join(' • ');
+  return `<div class="internat-shift ${shiftClassName(shift.type)}"><strong class="internat-hours">${escapeHtml(shift.hours)}</strong><div class="internat-person"><strong>${escapeHtml(shift.educator)}</strong><span>${escapeHtml(shift.label || 'Dyżur')}${relation ? ` • ${escapeHtml(relation)}` : ''}</span></div></div>`;
+}
+
+function groupInternatShifts(shifts = []) {
+  const groups = new Map();
+  shifts.forEach(shift => {
+    const group = getInternatShiftGroup(shift);
+    if (!groups.has(group.key)) groups.set(group.key, { ...group, shifts: [], hours: 0 });
+    const target = groups.get(group.key);
+    target.shifts.push(shift);
+    target.hours = round(target.hours + numberOr(shift.duration, 0));
+  });
+  return Array.from(groups.values()).sort((left, right) => left.order - right.order || left.label.localeCompare(right.label, 'pl'));
+}
+
+function getInternatShiftGroup(shift = {}) {
+  const explicitKey = String(shift.groupKey || '').trim();
+  const explicitLabel = String(shift.groupLabel || '').trim();
+  if (explicitKey && explicitLabel) return { key: explicitKey, label: explicitLabel, order: numberOr(shift.groupOrder, 50) };
+
+  const text = [shift.sourceGroup, shift.label, explicitKey, explicitLabel].filter(Boolean).join(' ');
+  if (String(shift.type || '').toLowerCase() === 'noc' || /(^|\s)noc(?:\s|$)/i.test(text)) {
+    return { key: 'night', label: 'Noc', order: 90 };
+  }
+
+  const vacationMatch = text.match(/\bgrupa\s+([ab])\b/i);
+  if (vacationMatch) {
+    const letter = vacationMatch[1].toUpperCase();
+    return { key: `vacation-${letter.toLowerCase()}`, label: `Grupa ${letter}`, order: letter === 'A' ? 1 : 2 };
+  }
+
+  const groupMatch = text.match(/(?:\bzast\.\s*)?\b(?:grupa|gr\.)\s*(VIII|VII|VI|IV|V|III|II|I|[1-8])\b/i);
+  if (groupMatch) {
+    const number = romanGroupNumber(groupMatch[1]);
+    return { key: `group-${number}`, label: `Grupa ${number}`, order: number };
+  }
+
+  return { key: 'other', label: 'Pozostałe', order: 99 };
+}
+
+function romanGroupNumber(value) {
+  const normalized = String(value || '').toUpperCase();
+  const roman = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8 };
+  return roman[normalized] || Math.min(Math.max(Number(normalized) || 0, 1), 8);
+}
+
+function formatGroupCount(count) {
+  if (count === 1) return '1 grupa';
+  if (count >= 2 && count <= 4) return `${count} grupy`;
+  return `${count} grup`;
+}
+
+function formatInternatSectionSummary(groups = []) {
+  const groupCount = groups.filter(group => /^group-|^vacation-/.test(group.key)).length;
+  const extras = [];
+  if (groups.some(group => group.key === 'night')) extras.push('Noc');
+  if (groups.some(group => group.key === 'other')) extras.push('pozostałe');
+  return [formatGroupCount(groupCount), ...extras].join(' + ');
+}
+
+function formatDutyCount(count) {
+  if (count === 1) return '1 dyżur';
+  if (count >= 2 && count <= 4) return `${count} dyżury`;
+  return `${count} dyżurów`;
 }
 
 function renderDay(day) {

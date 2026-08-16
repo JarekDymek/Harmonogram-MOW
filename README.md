@@ -2,7 +2,7 @@
 
 PWA do pobierania grafików internatu z Gmaila, odczytu plików DOCX, prezentowania dyżurów wychowawców oraz synchronizacji wybranych wpisów z Kalendarzem Google. Frontend jest statyczną aplikacją HTML/CSS/JavaScript, a backend działa w Google Apps Script.
 
-Aktualna wersja techniczna: **12.2.0**
+Aktualna wersja techniczna: **12.3.0**
 Ostatni pełny audyt: **16 sierpnia 2026**
 Repozytorium: [JarekDymek/Harmonogram-MOW](https://github.com/JarekDymek/Harmonogram-MOW)
 
@@ -16,7 +16,7 @@ Repozytorium: [JarekDymek/Harmonogram-MOW](https://github.com/JarekDymek/Harmono
 - przechowuje historię tygodni oraz listę wykrytych wychowawców;
 - synchronizuje Kalendarz Google wyłącznie dla `CONFIG.calendarEducator`;
 - po każdym uruchomieniu automatycznie pobiera dane, a z `ADMIN_TOKEN` także skanuje Gmail i uzgadnia Kalendarz;
-- udostępnia na żądanie pełny plan całego internatu dla wybranego tygodnia;
+- udostępnia na żądanie pełny plan całego internatu dla wybranego tygodnia w układzie dzień → grupa → dyżury;
 - działa jako instalowalna PWA oraz udostępnia ostatnio zapisany widok offline;
 - rozróżnia dostęp tylko do odczytu (`VIEW_TOKEN`) od administracyjnego (`ADMIN_TOKEN`).
 
@@ -110,6 +110,13 @@ Po zimnym uruchomieniu aplikacja automatycznie:
 
 Filtr **Cały internat** pobiera osobną akcją `internat` plan tylko dla aktualnie wybranego tygodnia. Odpowiedź jest chroniona co najmniej `VIEW_TOKEN` i zapisywana lokalnie jako cache danego tygodnia. Zwykły dashboard nie jest przez to powiększany ani spowalniany.
 
+Widok pełnego planu ma dwa poziomy rozwijania:
+
+1. dzień tygodnia;
+2. grupa 1–8 albo wakacyjna A/B; nocne dyżury są zachowane w osobnej sekcji **Noc**.
+
+Frontend przechowuje do ośmiu ostatnio pobranych pełnych tygodni. Automatyczna aktualizacja pulpitu nie kasuje tego cache. Backend przekazuje `sourceVersion`, dlatego konkretny tydzień jest pobierany ponownie dopiero wtedy, gdy zmieni się zestaw dokumentów źródłowych. Pierwsze uruchomienie po przejściu ze starszej wersji może jednorazowo odświeżyć pełny tydzień, aby nadać mu wersję źródła.
+
 ## Konfiguracja backendu
 
 Najczęściej zmieniane pola znajdują się na początku `apps-script/Code.gs`.
@@ -146,18 +153,19 @@ npm test
 npm run check
 ```
 
-`npm test` uruchamia dziesięć zestawów kontroli:
+`npm test` uruchamia jedenaście zestawów kontroli:
 
 1. poprawność JSON i składni JavaScript;
 2. zgodność identyfikatorów HTML z odwołaniami w frontendzie;
 3. daty lokalne, przedziały przez północ, URL i normalizację danych;
-4. testy parsera Apps Script, w tym przełom roku i nocne dyżury;
-5. kompresję i dzielenie dużych danych zgodnie z limitem 9 KB;
-6. domyślną blokadę backendu bez tokenów;
-7. idempotentną i bezpiecznie uporządkowaną synchronizację Calendar;
-8. budowę pełnego planu internatu dla wszystkich wykrytych osób;
-9. pojedyncze menu, auto-synchronizację i spójność wersjonowanych zasobów 12.2;
-10. izolację żądań i cache service workera.
+4. grupowanie pełnego planu i zachowanie aktualnego cache;
+5. testy parsera Apps Script, w tym przełom roku i nocne dyżury;
+6. kompresję i dzielenie dużych danych zgodnie z limitem 9 KB;
+7. domyślną blokadę backendu bez tokenów;
+8. idempotentną i bezpiecznie uporządkowaną synchronizację Calendar;
+9. budowę pełnego planu internatu dla wszystkich wykrytych osób;
+10. pojedyncze menu, auto-synchronizację i spójność wersjonowanych zasobów 12.3;
+11. izolację żądań i cache service workera.
 
 Testy lokalne używają atrap usług Google. Nie zastępują testu wdrożonego Apps Script z prawdziwym kontem Gmail i Calendar.
 
@@ -215,7 +223,7 @@ Aktualny manifest używa osobnych, skalowalnych ikon SVG typu `any` i `maskable`
 
 ### Jak sprawdzić i wymusić aktualizację PWA
 
-Numer uruchomionego frontendu jest zawsze widoczny po rozwinięciu **Ustawienia**. Dla wersji 12.2 powinien wynosić `12.2.0`.
+Numer uruchomionego frontendu jest zawsze widoczny po rozwinięciu **Ustawienia**. Dla tego wydania powinien wynosić `12.3.0`.
 
 Na komputerze:
 
@@ -287,6 +295,16 @@ Uruchom w edytorze Apps Script `setupSecurityTokens()`, a następnie utwórz now
 - Calendar API v3 musi być włączone;
 - sprawdź historię wykonań i dzienny limit Calendar;
 - uruchom jednorazowo `syncVisibleWeeksToCalendar_()`.
+
+## Zmiany wydania 12.3.0
+
+- przebudowano widok **Cały internat** na rozwijaną hierarchię dzień → grupa → dyżury;
+- grupy I–VIII z dokumentu są prezentowane jako Grupa 1–8, a tryb wakacyjny zachowuje Grupy A/B;
+- nocne dyżury trafiają do osobnej sekcji **Noc**, więc nie giną poza grupami;
+- naprawiono kasowanie pełnych tygodni z pamięci po automatycznym odświeżeniu dashboardu;
+- dodano wersję zestawu dokumentów źródłowych, dzięki której cache jest odświeżany dopiero po zmianie grafiku;
+- ograniczono lokalny cache pełnego internatu do ośmiu tygodni;
+- pełny plan ma układ jednokolumnowy i poprawione zachowanie na wąskich ekranach.
 
 ## Zmiany wydania 12.2.0
 

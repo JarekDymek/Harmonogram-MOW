@@ -312,7 +312,9 @@ html[data-layout="desktop"] .app-main { max-width: 1320px; }
   .warning-line, .warning-card { background: #251b0c; border-color: #6d4c17; color: #ffd898; }
   .info-card { background: #101926; border-color: #34567d; }
   .success-card { background: #102215; border-color: #3e7a4a; color: #a5f3b5; }
-  .internat-day > header { background: #222; }
+  .internat-day > summary,
+  .internat-group > summary { background: #222; }
+  .internat-group { background: #191919; }
   .relief-right { border-top-color: rgba(255,255,255,.14); }
 }
 
@@ -385,18 +387,68 @@ html[data-layout="desktop"] .app-main { max-width: 1320px; }
   box-shadow: var(--shadow);
 }
 .internat-day.weekend { border-color: #050505; }
-.internat-day > header {
-  display: flex;
+.internat-day > summary,
+.internat-group > summary {
+  display: grid;
   align-items: center;
-  justify-content: space-between;
   gap: 14px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.internat-day > summary::-webkit-details-marker,
+.internat-group > summary::-webkit-details-marker { display: none; }
+.internat-day > summary {
+  grid-template-columns: minmax(0, 1fr) auto 34px;
   padding: 14px 16px;
   background: #f0f0f0;
-  border-bottom: 2px solid var(--border);
 }
-.internat-day > header div { display: flex; align-items: baseline; gap: 10px; }
-.internat-day > header strong { font-size: 1.35rem; }
-.internat-day > header span { color: var(--muted); font-size: .86rem; white-space: nowrap; }
+.internat-day > summary::after,
+.internat-group > summary::after {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  content: "+";
+  font-size: 1.35rem;
+  line-height: 1;
+}
+.internat-day[open] > summary::after,
+.internat-group[open] > summary::after { content: "−"; }
+.internat-day[open] > summary { border-bottom: 2px solid var(--border); }
+.internat-day-title { display: flex; align-items: baseline; gap: 10px; }
+.internat-day-title strong { font-size: 1.35rem; }
+.internat-day-title span,
+.internat-day-stats span,
+.internat-group > summary span { color: var(--muted); font-size: .86rem; }
+.internat-day-title span { white-space: nowrap; }
+.internat-day-stats {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  white-space: nowrap;
+}
+.internat-day-stats strong { font-size: 1rem; }
+.internat-day-body { display: grid; gap: 10px; padding: 12px; }
+.internat-group {
+  overflow: hidden;
+  border: 2px solid var(--border);
+  border-radius: 17px;
+  background: #fafafa;
+}
+.internat-group > summary {
+  grid-template-columns: minmax(0, 1fr) auto 32px;
+  min-height: 58px;
+  padding: 10px 12px;
+  background: #fafafa;
+}
+.internat-group[open] > summary { border-bottom: 1px solid var(--border); }
+.internat-group > summary div { display: grid; gap: 3px; }
+.internat-group > summary strong { font-size: 1.03rem; }
 .internat-shift-list { display: grid; gap: 0; padding: 0 16px; }
 .internat-shift {
   display: grid;
@@ -413,14 +465,15 @@ html[data-layout="desktop"] .app-main { max-width: 1320px; }
 .internat-person strong,
 .internat-person span { overflow-wrap: break-word; word-break: normal; }
 .internat-person span { color: var(--muted); font-size: .84rem; line-height: 1.3; font-weight: 720; }
-@media (min-width: 880px) {
-  .internat-days { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
+.internat-day-empty { margin: 8px 4px; }
 @media (max-width: 430px) {
   .internat-head .internat-metrics { grid-template-columns: 1fr 1fr; }
   .internat-head .internat-metrics .metric:last-child { grid-column: 1 / -1; }
-  .internat-day > header { align-items: flex-start; }
-  .internat-day > header div { display: grid; gap: 2px; }
+  .internat-day > summary { grid-template-columns: minmax(0, 1fr) 32px; align-items: start; }
+  .internat-day-title { display: grid; gap: 2px; }
+  .internat-day-stats { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; flex-wrap: wrap; white-space: normal; }
+  .internat-day > summary::after { grid-column: 2; grid-row: 1; }
+  .internat-group > summary { grid-template-columns: minmax(0, 1fr) auto 30px; gap: 8px; }
   .internat-shift { grid-template-columns: 1fr; gap: 5px; }
 }
 .week-tools label {
@@ -509,7 +562,12 @@ html[data-layout="desktop"] .app-main { max-width: 1320px; }
   .app-main { width: 100%; max-width: none; padding: 0; }
   .card, .day-card { box-shadow: none !important; break-inside: avoid; border-color: #000 !important; }
   .days { grid-template-columns: repeat(2, minmax(0,1fr)) !important; }
-  .internat-days { grid-template-columns: repeat(2, minmax(0,1fr)) !important; }
+  .internat-day > summary::after,
+  .internat-group > summary::after { display: none !important; }
+  .internat-day > .internat-day-body,
+  .internat-group > .internat-shift-list { display: grid !important; }
+  .internat-day,
+  .internat-group { break-inside: avoid; }
 }
 
 @media (prefers-reduced-motion: reduce) {
