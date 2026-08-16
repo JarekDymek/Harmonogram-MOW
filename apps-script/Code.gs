@@ -1,6 +1,6 @@
 const CONFIG = {
   appName: 'Harmonogram MOW',
-  backendVersion: '2026-08-16-full-internat-12.2.0',
+  backendVersion: '2026-08-16-grouped-internat-cache-12.3.0',
   securityMode: 'token',
   sourceEmail: 'harmonogram@example.com',
   calendarId: 'primary',
@@ -688,6 +688,14 @@ function compareDocs_(a, b) {
   return db - da;
 }
 
+function buildDocsVersion_(docs) {
+  const parts = (docs || []).slice().sort(compareDocs_).map(function (doc) {
+    const source = doc && doc.source ? doc.source : {};
+    return source.digest || [source.filename || '', source.messageDate || '', doc.updatedAt || ''].join('|');
+  }).filter(Boolean);
+  return parts.length ? sha256_(parts.join('||')) : '';
+}
+
 function isCorrectionDocument_(doc) {
   const s = normalizeName_((doc.source.filename || '') + ' ' + (doc.source.subject || '') + ' ' + (doc.source.kind || ''));
   return s.indexOf('korekta') !== -1 || s.indexOf('poprawka') !== -1 || s.indexOf('zmiana') !== -1 || s.indexOf('correction') !== -1;
@@ -1069,6 +1077,7 @@ function buildWeekView_(weekStart, educator) {
     hasEducatorPlan: selected.found,
     source: source ? source.filename : '',
     sourceInfo: source,
+    sourceVersion: buildDocsVersion_(docs),
     availableDocuments: docs.map(function (doc) { return { filename: doc.source.filename, kind: doc.source.kind, priority: doc.source.priority, messageDate: doc.source.messageDate }; }),
     changes: changes,
     hasChanges: changes.length > 0,
@@ -1148,6 +1157,7 @@ function buildInternatWeekFromDocs_(weekStart, docs) {
     weekEnd: toIsoDate_(addDays_(parseIsoDate_(weekStart), 6)),
     hasData: sortedDocs.length > 0,
     source: source ? source.filename : '',
+    sourceVersion: buildDocsVersion_(sortedDocs),
     staff: visibleStaff,
     staffCount: visibleStaff.length,
     shiftCount: shiftCount,

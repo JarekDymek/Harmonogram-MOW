@@ -1,7 +1,7 @@
 const CACHE_PREFIX = 'harmonogram-mow-shell-';
-const APP_VERSION = '12.2.0';
+const APP_VERSION = '12.3.0';
 const CACHE = `${CACHE_PREFIX}${APP_VERSION}`;
-const ASSETS = ['./', './index.html', './assets/styles.css?v=12.2.0', './assets/app.js?v=12.2.0', './assets/icon.svg', './assets/icon-maskable.svg', './manifest.webmanifest', './data/sample-weeks.json'];
+const ASSETS = ['./', './index.html', './assets/styles.css?v=12.3.0', './assets/app.js?v=12.3.0', './assets/icon.svg', './assets/icon-maskable.svg', './manifest.webmanifest', './data/sample-weeks.json'];
 const ASSET_URLS = new Set(ASSETS.map(path => new URL(path, self.registration.scope).href));
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting()));
