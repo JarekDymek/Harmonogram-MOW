@@ -163,6 +163,91 @@
     }
   ],
   "calendarEducator": "Osoba Testowa",
+  "internatWeeks": {
+    "2026-06-08": {
+      "weekNumber": 41,
+      "label": "Tydzień 41",
+      "range": "08.06 – 14.06.2026",
+      "dateFrom": "2026-06-08",
+      "dateTo": "2026-06-14",
+      "weekStart": "2026-06-08",
+      "source": "Syntetyczny plan całego internatu",
+      "staff": ["Osoba Pierwsza", "Osoba Druga", "Osoba Trzecia", "Osoba Testowa"],
+      "staffCount": 4,
+      "shiftCount": 19,
+      "totalHours": 86,
+      "days": [
+        {
+          "name": "PON",
+          "date": "08.06",
+          "isoDate": "2026-06-08",
+          "shifts": [
+            { "educator": "Osoba Pierwsza", "type": "vi", "label": "Gr. VI", "hours": "06:00–08:00", "start": "06:00", "end": "08:00", "duration": 2 },
+            { "educator": "Osoba Testowa", "type": "vi", "label": "Gr. VI", "hours": "14:30–22:00", "start": "14:30", "end": "22:00", "duration": 7.5 }
+          ]
+        },
+        {
+          "name": "WT",
+          "date": "09.06",
+          "isoDate": "2026-06-09",
+          "shifts": [
+            { "educator": "Osoba Druga", "type": "vi", "label": "Gr. VI", "hours": "06:00–08:00", "start": "06:00", "end": "08:00", "duration": 2 },
+            { "educator": "Osoba Trzecia", "type": "vi", "label": "Gr. VI", "hours": "13:30–15:30", "start": "13:30", "end": "15:30", "duration": 2 },
+            { "educator": "Osoba Druga", "type": "vi", "label": "Gr. VI", "hours": "15:30–19:30", "start": "15:30", "end": "19:30", "duration": 4 },
+            { "educator": "Osoba Pierwsza", "type": "vi", "label": "Gr. VI", "hours": "19:30–22:00", "start": "19:30", "end": "22:00", "duration": 2.5 }
+          ]
+        },
+        {
+          "name": "ŚR",
+          "date": "10.06",
+          "isoDate": "2026-06-10",
+          "shifts": [
+            { "educator": "Osoba Testowa", "type": "vi", "label": "Gr. VI", "hours": "06:00–08:00", "start": "06:00", "end": "08:00", "duration": 2 },
+            { "educator": "Osoba Pierwsza", "type": "vi", "label": "Gr. VI", "hours": "13:00–19:00", "start": "13:00", "end": "19:00", "duration": 6 },
+            { "educator": "Osoba Druga", "type": "vi", "label": "Gr. VI", "hours": "19:00–22:00", "start": "19:00", "end": "22:00", "duration": 3 },
+            { "educator": "Osoba Testowa", "type": "noc", "label": "Noc", "hours": "22:00–24:00", "start": "22:00", "end": "24:00", "duration": 2 }
+          ]
+        },
+        {
+          "name": "CZW",
+          "date": "11.06",
+          "isoDate": "2026-06-11",
+          "shifts": [
+            { "educator": "Osoba Testowa", "type": "noc", "label": "Noc", "hours": "00:00–06:00", "start": "00:00", "end": "06:00", "duration": 6 },
+            { "educator": "Osoba Testowa", "type": "vi", "label": "Gr. VI", "hours": "06:00–08:00", "start": "06:00", "end": "08:00", "duration": 2 },
+            { "educator": "Osoba Trzecia", "type": "vi", "label": "Gr. VI", "hours": "13:00–14:00", "start": "13:00", "end": "14:00", "duration": 1 },
+            { "educator": "Osoba Testowa", "type": "vi", "label": "Gr. VI", "hours": "14:00–22:00", "start": "14:00", "end": "22:00", "duration": 8 }
+          ]
+        },
+        {
+          "name": "PT",
+          "date": "12.06",
+          "isoDate": "2026-06-12",
+          "shifts": [
+            { "educator": "Osoba Druga", "type": "vi", "label": "Gr. VI", "hours": "06:00–14:00", "start": "06:00", "end": "14:00", "duration": 8 },
+            { "educator": "Osoba Pierwsza", "type": "vi", "label": "Gr. VI", "hours": "14:00–22:00", "start": "14:00", "end": "22:00", "duration": 8 }
+          ]
+        },
+        {
+          "name": "SOB",
+          "date": "13.06",
+          "isoDate": "2026-06-13",
+          "shifts": [
+            { "educator": "Osoba Druga", "type": "vi", "label": "Gr. VI", "hours": "08:00–16:00", "start": "08:00", "end": "16:00", "duration": 8 },
+            { "educator": "Osoba Testowa", "type": "vi", "label": "Gr. VI", "hours": "16:00–22:00", "start": "16:00", "end": "22:00", "duration": 6 }
+          ]
+        },
+        {
+          "name": "ND",
+          "date": "14.06",
+          "isoDate": "2026-06-14",
+          "shifts": [
+            { "educator": "Osoba Druga", "type": "vi", "label": "Gr. VI", "hours": "08:00–14:00", "start": "08:00", "end": "14:00", "duration": 6 }
+          ]
+        }
+      ]
+    }
+  },
   "alerts": [
     {
       "id": "sample-correction-alert",

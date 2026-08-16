@@ -2,7 +2,7 @@
 
 PWA do pobierania grafików internatu z Gmaila, odczytu plików DOCX, prezentowania dyżurów wychowawców oraz synchronizacji wybranych wpisów z Kalendarzem Google. Frontend jest statyczną aplikacją HTML/CSS/JavaScript, a backend działa w Google Apps Script.
 
-Aktualna wersja techniczna: **12.1.3**
+Aktualna wersja techniczna: **12.2.0**
 Ostatni pełny audyt: **16 sierpnia 2026**
 Repozytorium: [JarekDymek/Harmonogram-MOW](https://github.com/JarekDymek/Harmonogram-MOW)
 
@@ -15,6 +15,8 @@ Repozytorium: [JarekDymek/Harmonogram-MOW](https://github.com/JarekDymek/Harmono
 - pokazuje godziny, nadgodziny, pracę weekendową, zmiany i ostrzeżenia;
 - przechowuje historię tygodni oraz listę wykrytych wychowawców;
 - synchronizuje Kalendarz Google wyłącznie dla `CONFIG.calendarEducator`;
+- po każdym uruchomieniu automatycznie pobiera dane, a z `ADMIN_TOKEN` także skanuje Gmail i uzgadnia Kalendarz;
+- udostępnia na żądanie pełny plan całego internatu dla wybranego tygodnia;
 - działa jako instalowalna PWA oraz udostępnia ostatnio zapisany widok offline;
 - rozróżnia dostęp tylko do odczytu (`VIEW_TOKEN`) od administracyjnego (`ADMIN_TOKEN`).
 
@@ -38,7 +40,7 @@ flowchart LR
 | Plik | Odpowiedzialność |
 |---|---|
 | `index.html` | Semantyczna struktura interfejsu i formularz ustawień |
-| `assets/app.js` | Stan aplikacji, komunikacja z backendem, normalizacja i renderowanie |
+| `assets/app.js` | Stan aplikacji, auto-synchronizacja, aktualizacje PWA, komunikacja z backendem i renderowanie |
 | `assets/styles.css` | Responsywny układ telefonu, tabletu, desktopu i wydruku |
 | `service-worker.js` | Precache app shell, tryb offline i izolacja cache tej aplikacji |
 | `manifest.webmanifest` | Metadane instalacyjne PWA |
@@ -95,6 +97,19 @@ Service worker:
 - respektuje żądania `cache: "no-store"`;
 - przechowuje tylko jawnie wskazane zasoby app shell.
 
+### Menu, automatyczny start i cały internat
+
+Górny pasek zawiera jeden przycisk **Ustawienia**. Rozwijane menu zachowuje ręczne akcje synchronizacji, podglądu, testu backendu, powiadomień i danych demonstracyjnych, a także pokazuje numer aktywnej wersji oraz przyciski instalacji i kontroli aktualizacji.
+
+Po zimnym uruchomieniu aplikacja automatycznie:
+
+- wywołuje `sync`, jeśli na urządzeniu zapisano `ADMIN_TOKEN`;
+- wywołuje tylko `dashboard`, jeśli zapisano wyłącznie `VIEW_TOKEN`;
+- nie łączy się z backendem, jeśli nie ma URL albo tokenu;
+- ponawia odświeżenie po powrocie do aplikacji, gdy była w tle dłużej niż 5 minut.
+
+Filtr **Cały internat** pobiera osobną akcją `internat` plan tylko dla aktualnie wybranego tygodnia. Odpowiedź jest chroniona co najmniej `VIEW_TOKEN` i zapisywana lokalnie jako cache danego tygodnia. Zwykły dashboard nie jest przez to powiększany ani spowalniany.
+
 ## Konfiguracja backendu
 
 Najczęściej zmieniane pola znajdują się na początku `apps-script/Code.gs`.
@@ -131,7 +146,7 @@ npm test
 npm run check
 ```
 
-`npm test` uruchamia osiem zestawów kontroli:
+`npm test` uruchamia dziesięć zestawów kontroli:
 
 1. poprawność JSON i składni JavaScript;
 2. zgodność identyfikatorów HTML z odwołaniami w frontendzie;
@@ -140,7 +155,9 @@ npm run check
 5. kompresję i dzielenie dużych danych zgodnie z limitem 9 KB;
 6. domyślną blokadę backendu bez tokenów;
 7. idempotentną i bezpiecznie uporządkowaną synchronizację Calendar;
-8. izolację żądań i cache service workera.
+8. budowę pełnego planu internatu dla wszystkich wykrytych osób;
+9. pojedyncze menu, auto-synchronizację i spójność wersjonowanych zasobów 12.2;
+10. izolację żądań i cache service workera.
 
 Testy lokalne używają atrap usług Google. Nie zastępują testu wdrożonego Apps Script z prawdziwym kontem Gmail i Calendar.
 
@@ -190,10 +207,31 @@ Nie uruchamiaj `install()` przy każdej drobnej zmianie, jeżeli działający tr
    - `service-worker.js`.
 3. Po zmianie dowolnego pliku app shell zmień wersję `CACHE` w `service-worker.js`.
 4. Ujednolić tę samą wersję w `package.json` i `CONFIG.backendVersion`.
-5. Po publikacji otwórz aplikację online dwukrotnie, aby nowy worker zainstalował się i przejął stronę.
-6. Sprawdź online oraz offline w narzędziach aplikacji przeglądarki.
+5. Zmień również parametr `?v=` przy CSS i JavaScript w `index.html` oraz na liście `ASSETS` service workera.
+6. Po publikacji otwórz aplikację online; od wersji 12.2 kontroler przeładowuje stronę po przejęciu nowego workera.
+7. Sprawdź online oraz offline w narzędziach aplikacji przeglądarki.
 
 Aktualny manifest używa osobnych, skalowalnych ikon SVG typu `any` i `maskable`. Chromium je obsługuje. Dla maksymalnej zgodności z iOS i starszymi instalatorami warto w kolejnym wydaniu dodać także rasteryzowane ikony PNG 192×192 i 512×512.
+
+### Jak sprawdzić i wymusić aktualizację PWA
+
+Numer uruchomionego frontendu jest zawsze widoczny po rozwinięciu **Ustawienia**. Dla wersji 12.2 powinien wynosić `12.2.0`.
+
+Na komputerze:
+
+1. otwórz aplikację z dostępem do internetu;
+2. rozwiń **Ustawienia** i wybierz **Sprawdź aktualizację**;
+3. jeżeli nadal widać poprzednią wersję, zamknij wszystkie karty aplikacji i otwórz ją ponownie;
+4. dopiero w ostateczności użyj **Wyczyść dane** — ta akcja usuwa także zapisany URL i tokeny.
+
+Na telefonie lub w zainstalowanej PWA:
+
+1. uruchom aplikację przy aktywnym internecie;
+2. pozostaw ją otwartą przez kilka sekund, zamknij i uruchom ponownie;
+3. sprawdź numer wersji w **Ustawieniach**;
+4. gdy nadal jest stary, wybierz **Sprawdź aktualizację**; odinstalowanie jest potrzebne tylko wtedy, gdy systemowy WebView lub przeglądarka nie wymienia service workera.
+
+Wydanie 12.2 używa wersjonowanych adresów `app.js` i `styles.css`. Dzięki temu stary service worker nie może podstawić kodu poprzedniej wersji pod nowy HTML.
 
 ## Migracja ze starszych wersji
 
@@ -250,6 +288,16 @@ Uruchom w edytorze Apps Script `setupSecurityTokens()`, a następnie utwórz now
 - sprawdź historię wykonań i dzienny limit Calendar;
 - uruchom jednorazowo `syncVisibleWeeksToCalendar_()`.
 
+## Zmiany wydania 12.2.0
+
+- zastąpiono sześć stale widocznych akcji jednym rozwijanym menu **Ustawienia**;
+- dodano automatyczne pobieranie lub synchronizację przy starcie i po dłuższym powrocie z tła;
+- dodano chronioną akcję backendu `internat` oraz widok pełnego planu dla każdego dostępnego tygodnia;
+- dodano widoczną wersję aplikacji, pomoc instalacji i ręczną kontrolę aktualizacji;
+- wersjonowanie adresów CSS/JS usuwa problem mieszania starego skryptu z nowym HTML;
+- tryb „PC” nie wymusza już trzech kolumn na wąskim ekranie;
+- ograniczono zbyt duże fonty, łamanie pojedynczych liter i ściskanie informacji o zmianach.
+
 ## Wynik audytu 12.1.3
 
 Naprawione problemy o najwyższym wpływie:
@@ -287,7 +335,7 @@ Naprawione problemy o najwyższym wpływie:
 - uruchom `npm run check`;
 - sprawdź aplikację przy szerokości telefonu i desktopu;
 - sprawdź świeżą instalację oraz uruchomienie offline;
-- zwiększ wersję w `package.json`, cache service workera i `backendVersion`;
+- zwiększ wersję w `package.json`, `APP_VERSION`, cache service workera, parametrach `?v=` zasobów i `backendVersion`;
 - wdrażaj najpierw Apps Script, potem frontend;
 - wykonaj `ping` przez `VIEW_TOKEN`;
 - wykonaj jedną kontrolowaną synchronizację przez `ADMIN_TOKEN`;

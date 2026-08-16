@@ -8,7 +8,7 @@
   <meta name="description" content="Harmonogram pracy MOW: Gmail, korekty, historia godzin, weekendy i Google Calendar.">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="assets/styles.css">
+  <link rel="stylesheet" href="assets/styles.css?v=12.2.0">
   <title>Harmonogram MOW</title>
 </head>
 <body>
@@ -18,17 +18,30 @@
       <h1>Harmonogram MOW</h1>
       <p id="lastSync" class="subline">Ładowanie danych…</p>
     </div>
-    <button id="installBtn" class="ghost hidden" type="button">Zainstaluj</button>
   </header>
 
   <main class="app-main">
-    <section class="toolbar card" aria-label="Główne akcje">
-      <button id="refreshBtn" class="primary" type="button">Pobierz / synchronizuj</button>
-      <button id="dashboardBtn" class="secondary" type="button">Tylko podgląd</button>
-      <button id="testBackendBtn" class="secondary" type="button">Test backendu</button>
-      <button id="settingsBtn" class="secondary" type="button">Ustawienia</button>
-      <button id="notifyBtn" class="secondary" type="button">Powiadomienia</button>
-      <button id="sampleBtn" class="secondary" type="button">Dane testowe</button>
+    <section class="command-bar" aria-label="Menu aplikacji">
+      <details id="actionsMenu" class="action-menu">
+        <summary>Ustawienia <span aria-hidden="true">⌄</span></summary>
+        <div class="action-menu-panel card">
+          <div class="app-version" aria-live="polite">
+            <strong>Harmonogram MOW <span id="appVersion">12.2.0</span></strong>
+            <span id="updateStatus">Sprawdzanie wersji…</span>
+          </div>
+          <div class="menu-actions">
+            <button id="settingsBtn" class="secondary" type="button">Ustawienia połączenia</button>
+            <button id="refreshBtn" class="primary" type="button">Pobierz / synchronizuj teraz</button>
+            <button id="dashboardBtn" class="secondary" type="button">Tylko podgląd</button>
+            <button id="testBackendBtn" class="secondary" type="button">Test backendu</button>
+            <button id="notifyBtn" class="secondary" type="button">Powiadomienia</button>
+            <button id="sampleBtn" class="secondary" type="button">Dane testowe</button>
+            <button id="installBtn" class="secondary" type="button">Zainstaluj aplikację</button>
+            <button id="updateBtn" class="secondary" type="button">Sprawdź aktualizację</button>
+          </div>
+          <p class="menu-note">Przy uruchomieniu aplikacja automatycznie pobiera dane, a z ADMIN_TOKEN także synchronizuje Gmail i Kalendarz.</p>
+        </div>
+      </details>
     </section>
 
     <section id="settingsPanel" class="card settings hidden" aria-label="Ustawienia aplikacji">
@@ -97,6 +110,7 @@
             <option value="work">Tylko dni pracy</option>
             <option value="changed">Tylko dni ze zmianami</option>
             <option value="warnings">Tylko ostrzeżenia</option>
+            <option value="internat">Cały internat</option>
           </select>
         </label>
         <button id="printBtn" class="secondary" type="button">Druk / PDF</button>
@@ -133,6 +147,6 @@
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="assets/app.js" type="module"></script>
+  <script src="assets/app.js?v=12.2.0" type="module"></script>
 </body>
 </html>
