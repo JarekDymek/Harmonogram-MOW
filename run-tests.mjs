@@ -63,6 +63,28 @@ await test('funkcje dat, URL i normalizacji frontendu', () => {
   assert.equal(normalized.summary.totalHours, 2, 'Wyliczona suma godzin musi być nadrzędna wobec starego podsumowania');
 });
 
+await test('żądania Apps Script wymuszają właściwe konto Google', () => {
+  const app = read('assets/app.js');
+  const start = app.indexOf('function normalizeBackendUrl');
+  const context = vm.createContext({
+    URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 8,
+    state: {
+      backendUrl: 'https://script.google.com/macros/s/ABC/exec',
+      educator: 'Dymek',
+      viewToken: 'view_test',
+      adminToken: ''
+    }
+  });
+  new vm.Script(`${app.slice(start)}\n    globalThis.backendRequest = { backendUrlWithParams, buildPublicTestUrl };`
+  ).runInContext(context);
+  const requestUrl = context.backendRequest.backendUrlWithParams('dashboard', { weekStart: '2026-08-10' });
+  assert.equal(requestUrl.searchParams.get('authuser'), '0');
+  assert.equal(requestUrl.searchParams.get('action'), 'dashboard');
+  assert.equal(requestUrl.searchParams.get('weekStart'), '2026-08-10');
+  assert.equal(requestUrl.searchParams.get('token'), 'view_test');
+  assert.equal(new URL(context.backendRequest.buildPublicTestUrl(requestUrl)).searchParams.get('authuser'), '0');
+});
+
 await test('most iframe akceptuje wyłącznie właściwą odpowiedź z ramki Google', () => {
   const app = read('assets/app.js');
   const start = app.indexOf('function normalizeBackendUrl');
@@ -264,20 +286,21 @@ await test('synchronizacja kalendarza jest idempotentna i nie usuwa przed wstawi
   assert.equal(runtime.context.secondSync.unchanged, 1);
 });
 
-await test('interfejs 12.3.1 ma jedno menu, auto-synchronizację i wersjonowane zasoby', () => {
+await test('interfejs 12.3.2 ma jedno menu, auto-synchronizację i wersjonowane zasoby', () => {
   const html = read('index.html');
   const app = read('assets/app.js');
   const worker = read('service-worker.js');
   const sample = JSON.parse(read('data/sample-weeks.json'));
   const packageData = JSON.parse(read('package.json'));
-  assert.equal(packageData.version, '12.3.1');
+  assert.equal(packageData.version, '12.3.2');
   assert.equal((html.match(/id="actionsMenu"/g) || []).length, 1);
   assert.match(html, /<option value="internat">Cały internat<\/option>/);
-  assert.match(html, /assets\/app\.js\?v=12\.3\.1/);
-  assert.match(html, /assets\/styles\.css\?v=12\.3\.1/);
+  assert.match(html, /assets\/app\.js\?v=12\.3\.2/);
+  assert.match(html, /assets\/styles\.css\?v=12\.3\.2/);
   assert.match(app, /autoRefreshFromBackend\('start'\)/);
   assert.match(app, /state\.adminToken \? 'sync' : 'dashboard'/);
-  assert.match(worker, /APP_VERSION = '12\.3\.1'/);
+  assert.match(worker, /APP_VERSION = '12\.3\.2'/);
+  assert.match(app, /searchParams\.set\('authuser', '0'\)/);
   assert.match(app, /<details class="internat-day/);
   assert.match(app, /<details class="internat-group/);
   assert.ok(sample.internatWeeks?.['2026-06-08'], 'Brak demonstracyjnego planu całego internatu');

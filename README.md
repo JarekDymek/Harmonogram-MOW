@@ -2,8 +2,8 @@
 
 PWA do pobierania grafików internatu z Gmaila, odczytu plików DOCX, prezentowania dyżurów wychowawców oraz synchronizacji wybranych wpisów z Kalendarzem Google. Frontend jest statyczną aplikacją HTML/CSS/JavaScript, a backend działa w Google Apps Script.
 
-Aktualna wersja techniczna: **12.3.1**
-Ostatni pełny audyt: **16 sierpnia 2026**
+Aktualna wersja techniczna: **12.3.2**
+Ostatni pełny audyt: **25 sierpnia 2026**
 Repozytorium: [JarekDymek/Harmonogram-MOW](https://github.com/JarekDymek/Harmonogram-MOW)
 
 ## Co robi aplikacja
@@ -153,19 +153,21 @@ npm test
 npm run check
 ```
 
-`npm test` uruchamia jedenaście zestawów kontroli:
+`npm test` uruchamia trzynaście zestawów kontroli:
 
 1. poprawność JSON i składni JavaScript;
 2. zgodność identyfikatorów HTML z odwołaniami w frontendzie;
 3. daty lokalne, przedziały przez północ, URL i normalizację danych;
-4. grupowanie pełnego planu i zachowanie aktualnego cache;
-5. testy parsera Apps Script, w tym przełom roku i nocne dyżury;
-6. kompresję i dzielenie dużych danych zgodnie z limitem 9 KB;
-7. domyślną blokadę backendu bez tokenów;
-8. idempotentną i bezpiecznie uporządkowaną synchronizację Calendar;
-9. budowę pełnego planu internatu dla wszystkich wykrytych osób;
-10. pojedyncze menu, auto-synchronizację i spójność wersjonowanych zasobów 12.3;
-11. izolację żądań i cache service workera.
+4. wymuszenie właściwego profilu Google w żądaniach Apps Script;
+5. kontrolę pochodzenia i identyfikatora odpowiedzi mostu iframe;
+6. grupowanie pełnego planu i zachowanie aktualnego cache;
+7. testy parsera Apps Script, w tym przełom roku i nocne dyżury;
+8. budowę pełnego planu internatu dla wszystkich wykrytych osób;
+9. kompresję i dzielenie dużych danych zgodnie z limitem 9 KB;
+10. domyślną blokadę backendu bez skonfigurowanych tokenów;
+11. idempotentną i bezpiecznie uporządkowaną synchronizację Calendar;
+12. pojedyncze menu, auto-synchronizację i spójność wersjonowanych zasobów 12.3;
+13. izolację żądań i cache service workera.
 
 Testy lokalne używają atrap usług Google. Nie zastępują testu wdrożonego Apps Script z prawdziwym kontem Gmail i Calendar.
 
@@ -223,7 +225,7 @@ Aktualny manifest używa osobnych, skalowalnych ikon SVG typu `any` i `maskable`
 
 ### Jak sprawdzić i wymusić aktualizację PWA
 
-Numer uruchomionego frontendu jest zawsze widoczny po rozwinięciu **Ustawienia**. Dla tego wydania powinien wynosić `12.3.1`.
+Numer uruchomionego frontendu jest zawsze widoczny po rozwinięciu **Ustawienia**. Dla tego wydania powinien wynosić `12.3.2`.
 
 Na komputerze:
 
@@ -282,14 +284,15 @@ Uruchom w edytorze Apps Script `setupSecurityTokens()`, a następnie utwórz now
 
 ### „Most iframe i JSONP nie zwróciły danych”
 
-Wydanie 12.3.1 naprawia most dla zagnieżdżonych ramek Google Apps Script. Backend przekazuje odpowiedź do głównego okna PWA wraz z jednorazowym identyfikatorem żądania, a frontend przyjmuje ją tylko z domeny Google i tylko dla oczekiwanej operacji.
+Wydanie 12.3.2 naprawia również routing wielu kont Google. Bez parametru `authuser=0` zalogowana przeglądarka mogła samoczynnie zamienić adres wdrożenia na trasę `/u/1/`, która pokazywała stronę „Nie można odnaleźć strony” zamiast odpowiedzi backendu. Wszystkie żądania aplikacji wymuszają teraz profil właściciela wdrożenia.
 
-Jeżeli komunikat nadal pojawia się na wersji 12.3.1:
+Jeżeli komunikat nadal pojawia się na wersji 12.3.2:
 
 1. otwórz link **Test backendu** i potwierdź, że pojawia się JSON z `ok:true` albo `ok:false`;
 2. wyłącz dla tej strony blokadę skryptów, reklam, prywatny DNS lub filtr antywirusowy blokujący `script.google.com` i `googleusercontent.com`;
 3. sprawdź połączenie w innej sieci;
-4. użyj **Sprawdź aktualizację** i uruchom PWA ponownie.
+4. użyj **Sprawdź aktualizację** i uruchom PWA ponownie;
+5. sprawdź, czy numer w menu wynosi dokładnie `12.3.2`.
 
 ### Brak grafiku dla osoby
 
@@ -306,6 +309,13 @@ Jeżeli komunikat nadal pojawia się na wersji 12.3.1:
 - Calendar API v3 musi być włączone;
 - sprawdź historię wykonań i dzienny limit Calendar;
 - uruchom jednorazowo `syncVisibleWeeksToCalendar_()`.
+
+## Zmiany wydania 12.3.2
+
+- naprawiono błąd synchronizacji występujący na telefonie i PC przy wielu zalogowanych kontach Google;
+- wszystkie wywołania Apps Script zachowują właściwy profil dzięki `authuser=0`;
+- poprawiono diagnostykę, aby nie sugerowała bezpodstawnie usuwania danych PWA;
+- dodano test regresji adresu backendu oraz ponownie podniesiono wersję cache PWA.
 
 ## Zmiany wydania 12.3.1
 
