@@ -1,4 +1,4 @@
-const APP_VERSION = '12.3.1';
+const APP_VERSION = '12.3.2';
 const STORAGE_KEY = 'harmonogram-mow-state-v12';
 const LEGACY_STORAGE_KEYS = ['harmonogram-mow-state-v11', 'harmonogram-mow-state-v10', 'harmonogram-mow-state-v9', 'harmonogram-mow-state-v8'];
 const MAX_INTERNAT_CACHE_WEEKS = 8;
@@ -350,6 +350,10 @@ async function checkForAppUpdate(manual = false) {
 
 function backendUrlWithParams(action, extraParams = {}) {
   const url = new URL(state.backendUrl);
+  // Apps Script can otherwise bind the request to another signed-in Google
+  // account (for example /u/1/) and return a "file not found" page instead of
+  // the web-app response. The deployment belongs to the primary account.
+  url.searchParams.set('authuser', '0');
   url.searchParams.set('action', action);
   url.searchParams.set('educator', state.educator || 'Dymek');
   Object.entries(extraParams).forEach(([key, value]) => {
@@ -477,7 +481,7 @@ async function requestBackend(url) {
         'Most iframe i JSONP nie zwróciły danych. ' +
         'Iframe: ' + (bridgeError && bridgeError.message ? bridgeError.message : 'brak szczegółów') +
         ' | JSONP: ' + (jsonpError && jsonpError.message ? jsonpError.message : 'brak szczegółów') +
-        '. Otwórz link testu backendu. Jeśli widzisz JSON z ok:true albo ok:false, backend działa, a problem był w starej PWA/cache.'
+        '. Aplikacja wymusza teraz właściwe konto Google (authuser=0). Otwórz link testu backendu; odpowiedź ok:true albo ok:false potwierdza działanie wdrożenia. Sprawdź też, czy przeglądarka nie blokuje script.google.com ani googleusercontent.com.'
       );
     }
   }
@@ -742,7 +746,7 @@ function renderBackendDiagnostics() {
   if (!target) return;
   if (!state.backendError) { target.innerHTML = ''; return; }
   const testUrl = state.backendUrl ? buildPublicTestUrl(backendUrlWithParams('ping')) : '';
-  target.innerHTML = `<section class="card danger-card"><h2>Błąd połączenia z backendem</h2><p>${escapeHtml(state.backendError)}</p><ol class="diagnostic-list"><li>Adres musi kończyć się na <strong>/exec</strong>, nie na /dev.</li><li>W Apps Script ustaw wdrożenie: <strong>Wykonaj jako: Ja</strong> oraz <strong>Kto ma dostęp: Każdy</strong>.</li><li>Po każdej zmianie kodu zrób: <strong>Wdróż → Zarządzaj wdrożeniami → Edytuj → Nowa wersja → Wdróż</strong>.</li><li>Na telefonie wyczyść dane PWA albo odinstaluj i zainstaluj ponownie.</li></ol>${testUrl ? `<a class="diagnostic-link" target="_blank" rel="noopener" href="${escapeHtml(testUrl)}">Otwórz test backendu</a>` : ''}</section>`;
+  target.innerHTML = `<section class="card danger-card"><h2>Błąd połączenia z backendem</h2><p>${escapeHtml(state.backendError)}</p><ol class="diagnostic-list"><li>Adres musi kończyć się na <strong>/exec</strong>, nie na /dev.</li><li>Aplikacja wymusza konto Google <strong>authuser=0</strong>, aby wiele zalogowanych kont nie kierowało żądania do błędnego profilu.</li><li>W Apps Script ustaw wdrożenie: <strong>Wykonaj jako: Ja</strong> oraz <strong>Kto ma dostęp: Każdy</strong>.</li><li>Po zmianie backendu zrób: <strong>Wdróż → Zarządzaj wdrożeniami → Edytuj → Nowa wersja → Wdróż</strong>.</li><li>Blokada skryptów, prywatny DNS lub filtr antywirusowy nie mogą blokować <strong>script.google.com</strong> ani <strong>googleusercontent.com</strong>.</li></ol>${testUrl ? `<a class="diagnostic-link" target="_blank" rel="noopener" href="${escapeHtml(testUrl)}">Otwórz test backendu</a>` : ''}</section>`;
 }
 
 function renderAlerts() {
