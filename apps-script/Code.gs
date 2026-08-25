@@ -1,6 +1,6 @@
 const CONFIG = {
   appName: 'Harmonogram MOW',
-  backendVersion: '2026-08-16-grouped-internat-cache-12.3.0',
+  backendVersion: '2026-08-25-nested-iframe-bridge-12.3.1',
   securityMode: 'token',
   sourceEmail: 'harmonogram@example.com',
   calendarId: 'primary',
@@ -43,6 +43,7 @@ function doGet(e) {
   const action = String(params.action || 'dashboard');
   const callback = params.callback || '';
   const transport = String(params.transport || params.format || '').toLowerCase();
+  const bridgeNonce = normalizeBridgeNonce_(params.bridgeNonce);
   const educator = normalizeEducatorInput_(params.educator || CONFIG.defaultEducator);
   const adminActions = { sync: true, scan: true, forceRescan: true, syncInfoCalendar: true, syncCalendar: true };
   const requiredLevel = adminActions[action] ? 'admin' : 'view';
@@ -57,42 +58,42 @@ function doGet(e) {
       weeks: [],
       history: [],
       alerts: []
-    }, callback, transport);
+    }, callback, transport, bridgeNonce);
   }
 
   try {
     if (action === 'ping') {
       const dashboard = getDashboardData(educator);
-      return jsonOutput_(backendResponse_(dashboard, null, { status: 'ready', action: 'ping', access: access }), callback, transport);
+      return jsonOutput_(backendResponse_(dashboard, null, { status: 'ready', action: 'ping', access: access }), callback, transport, bridgeNonce);
     }
 
     if (action === 'sync' || action === 'scan') {
       const scanResult = scanAndSync();
       const dashboard = getDashboardData(educator);
-      return jsonOutput_(backendResponse_(dashboard, scanResult, { action: action, access: access }), callback, transport);
+      return jsonOutput_(backendResponse_(dashboard, scanResult, { action: action, access: access }), callback, transport, bridgeNonce);
     }
 
     if (action === 'forceRescan') {
       const scanResult = forceRescan();
       const dashboard = getDashboardData(educator);
-      return jsonOutput_(backendResponse_(dashboard, scanResult, { action: 'forceRescan', access: access }), callback, transport);
+      return jsonOutput_(backendResponse_(dashboard, scanResult, { action: 'forceRescan', access: access }), callback, transport, bridgeNonce);
     }
 
   if (action === 'syncInfoCalendar') {
       const scanResult = { currentInfoCalendar: withScriptLock_('synchronizacja terminów informacyjnych', syncDirectorInfoToCalendar_) };
       const dashboard = getDashboardData(educator);
-      return jsonOutput_(backendResponse_(dashboard, scanResult, { action: 'syncInfoCalendar', access: access }), callback, transport);
+      return jsonOutput_(backendResponse_(dashboard, scanResult, { action: 'syncInfoCalendar', access: access }), callback, transport, bridgeNonce);
     }
 
   if (action === 'syncCalendar') {
       const scanResult = { calendarSyncedWeeks: withScriptLock_('synchronizacja Kalendarza Google', syncVisibleWeeksToCalendar_) };
       const dashboard = getDashboardData(educator);
-      return jsonOutput_(backendResponse_(dashboard, scanResult, { action: 'syncCalendar', access: access }), callback, transport);
+      return jsonOutput_(backendResponse_(dashboard, scanResult, { action: 'syncCalendar', access: access }), callback, transport, bridgeNonce);
     }
 
     if (action === 'dashboard') {
       const dashboard = getDashboardData(educator);
-      return jsonOutput_(backendResponse_(dashboard, null, { action: 'dashboard', access: access }), callback, transport);
+      return jsonOutput_(backendResponse_(dashboard, null, { action: 'dashboard', access: access }), callback, transport, bridgeNonce);
     }
 
     if (action === 'internat') {
@@ -108,13 +109,13 @@ function doGet(e) {
         internatWeek: internatWeek,
         generatedAt: new Date().toISOString(),
         security: getSecurityPublicInfo_(access)
-      }, callback, transport);
+      }, callback, transport, bridgeNonce);
     }
 
-    return jsonOutput_({ ok: false, error: 'Nieznana akcja: ' + action, data: null, weeks: [], history: [], alerts: [] }, callback, transport);
+    return jsonOutput_({ ok: false, error: 'Nieznana akcja: ' + action, data: null, weeks: [], history: [], alerts: [] }, callback, transport, bridgeNonce);
   } catch (err) {
     Logger.log('Błąd akcji web app "' + action + '": ' + (err.stack || err.message));
-    return jsonOutput_({ ok: false, error: err.message, data: null, weeks: [], history: [], alerts: [] }, callback, transport);
+    return jsonOutput_({ ok: false, error: err.message, data: null, weeks: [], history: [], alerts: [] }, callback, transport, bridgeNonce);
   }
 }
 
@@ -1910,14 +1911,14 @@ function clearAllStoredWeeks() {
   Logger.log('Usunięto zapisane dokumenty tygodni, stare tygodnie, alerty i znaczniki processed.');
 }
 
-function jsonOutput_(payload, callback, transport) {
+function jsonOutput_(payload, callback, transport, bridgeNonce) {
   payload = repairMojibake_(payload);
   const json = JSON.stringify(payload);
   const mode = String(transport || '').toLowerCase();
   const cb = String(callback || '').trim();
 
   if (mode === 'bridge' || mode === 'iframe' || mode === 'html') {
-    return bridgeOutput_(payload);
+    return bridgeOutput_(payload, bridgeNonce);
   }
 
   if (cb && /^[A-Za-z_$][0-9A-Za-z_$]*$/.test(cb)) {
@@ -1971,12 +1972,18 @@ function repairMojibakeText_(value) {
     .replace(/\u00E2\u20AC\u009D/g, '\u201D');
 }
 
-function bridgeOutput_(payload) {
+function normalizeBridgeNonce_(value) {
+  const nonce = String(value || '').trim();
+  return /^[0-9A-Za-z_-]{16,160}$/.test(nonce) ? nonce : '';
+}
+
+function bridgeOutput_(payload, bridgeNonce) {
   const json = JSON.stringify(payload)
     .replace(/</g, '\\u003c')
     .replace(/>/g, '\\u003e')
     .replace(/&/g, '\\u0026');
 
+  const nonce = JSON.stringify(normalizeBridgeNonce_(bridgeNonce));
   const html = '<!doctype html>' +
     '<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<title>Harmonogram MOW Backend</title>' +
@@ -1989,7 +1996,9 @@ function bridgeOutput_(payload) {
     '(function(){' +
     'var payload=' + json + ';' +
     'document.getElementById("out").textContent=JSON.stringify(payload,null,2);' +
-    'try{parent.postMessage({source:"harmonogram-mow-backend",payload:payload},"*");}catch(e){}' +
+    'var message={source:"harmonogram-mow-backend",bridgeNonce:' + nonce + ',payload:payload};' +
+    'try{if(window.top&&window.top!==window.parent){window.top.postMessage(message,"*");}}catch(e){}' +
+    'try{window.parent.postMessage(message,"*");}catch(e){}' +
     '})();' +
     '</script>' +
     '</body></html>';

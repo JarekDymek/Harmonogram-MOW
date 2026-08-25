@@ -63,6 +63,25 @@ await test('funkcje dat, URL i normalizacji frontendu', () => {
   assert.equal(normalized.summary.totalHours, 2, 'Wyliczona suma godzin musi być nadrzędna wobec starego podsumowania');
 });
 
+await test('most iframe akceptuje wyłącznie właściwą odpowiedź z ramki Google', () => {
+  const app = read('assets/app.js');
+  const start = app.indexOf('function normalizeBackendUrl');
+  const context = vm.createContext({ URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 8 });
+  new vm.Script(`${app.slice(start)}\n    globalThis.bridgeProtocol = { isAllowedBridgeOrigin, isExpectedBridgeMessage };`
+  ).runInContext(context);
+  const api = context.bridgeProtocol;
+  const iframeWindow = {};
+  const nestedWindow = {};
+  const bridgeNonce = '0123456789abcdef0123456789abcdef';
+  const message = { source: 'harmonogram-mow-backend', bridgeNonce, payload: { ok: true } };
+
+  assert.equal(api.isExpectedBridgeMessage({ source: nestedWindow, origin: 'https://n-test-script.googleusercontent.com', data: message }, iframeWindow, bridgeNonce), true);
+  assert.equal(api.isExpectedBridgeMessage({ source: nestedWindow, origin: 'https://example.com', data: message }, iframeWindow, bridgeNonce), false);
+  assert.equal(api.isExpectedBridgeMessage({ source: nestedWindow, origin: 'https://n-test-script.googleusercontent.com', data: { ...message, bridgeNonce: 'wrong-nonce' } }, iframeWindow, bridgeNonce), false);
+  assert.equal(api.isExpectedBridgeMessage({ source: iframeWindow, origin: 'https://script.google.com', data: { source: 'harmonogram-mow-backend', payload: { ok: true } } }, iframeWindow, bridgeNonce), true);
+  assert.match(read('apps-script/Code.gs'), /window\.top\.postMessage\(message,"\*"\)/);
+});
+
 await test('pełny plan grupuje dyżury i zachowuje aktualny cache', () => {
   const app = read('assets/app.js');
   const start = app.indexOf('function normalizeBackendUrl');
@@ -245,20 +264,20 @@ await test('synchronizacja kalendarza jest idempotentna i nie usuwa przed wstawi
   assert.equal(runtime.context.secondSync.unchanged, 1);
 });
 
-await test('interfejs 12.3 ma jedno menu, auto-synchronizację i wersjonowane zasoby', () => {
+await test('interfejs 12.3.1 ma jedno menu, auto-synchronizację i wersjonowane zasoby', () => {
   const html = read('index.html');
   const app = read('assets/app.js');
   const worker = read('service-worker.js');
   const sample = JSON.parse(read('data/sample-weeks.json'));
   const packageData = JSON.parse(read('package.json'));
-  assert.equal(packageData.version, '12.3.0');
+  assert.equal(packageData.version, '12.3.1');
   assert.equal((html.match(/id="actionsMenu"/g) || []).length, 1);
   assert.match(html, /<option value="internat">Cały internat<\/option>/);
-  assert.match(html, /assets\/app\.js\?v=12\.3\.0/);
-  assert.match(html, /assets\/styles\.css\?v=12\.3\.0/);
+  assert.match(html, /assets\/app\.js\?v=12\.3\.1/);
+  assert.match(html, /assets\/styles\.css\?v=12\.3\.1/);
   assert.match(app, /autoRefreshFromBackend\('start'\)/);
   assert.match(app, /state\.adminToken \? 'sync' : 'dashboard'/);
-  assert.match(worker, /APP_VERSION = '12\.3\.0'/);
+  assert.match(worker, /APP_VERSION = '12\.3\.1'/);
   assert.match(app, /<details class="internat-day/);
   assert.match(app, /<details class="internat-group/);
   assert.ok(sample.internatWeeks?.['2026-06-08'], 'Brak demonstracyjnego planu całego internatu');

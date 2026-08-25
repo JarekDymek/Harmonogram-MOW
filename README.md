@@ -2,7 +2,7 @@
 
 PWA do pobierania grafików internatu z Gmaila, odczytu plików DOCX, prezentowania dyżurów wychowawców oraz synchronizacji wybranych wpisów z Kalendarzem Google. Frontend jest statyczną aplikacją HTML/CSS/JavaScript, a backend działa w Google Apps Script.
 
-Aktualna wersja techniczna: **12.3.0**
+Aktualna wersja techniczna: **12.3.1**
 Ostatni pełny audyt: **16 sierpnia 2026**
 Repozytorium: [JarekDymek/Harmonogram-MOW](https://github.com/JarekDymek/Harmonogram-MOW)
 
@@ -223,7 +223,7 @@ Aktualny manifest używa osobnych, skalowalnych ikon SVG typu `any` i `maskable`
 
 ### Jak sprawdzić i wymusić aktualizację PWA
 
-Numer uruchomionego frontendu jest zawsze widoczny po rozwinięciu **Ustawienia**. Dla tego wydania powinien wynosić `12.3.0`.
+Numer uruchomionego frontendu jest zawsze widoczny po rozwinięciu **Ustawienia**. Dla tego wydania powinien wynosić `12.3.1`.
 
 Na komputerze:
 
@@ -280,6 +280,17 @@ Uruchom w edytorze Apps Script `setupSecurityTokens()`, a następnie utwórz now
 3. użyj przycisku „Wyczyść dane”, jeżeli można usunąć lokalny stan;
 4. w ostateczności odinstaluj PWA i zainstaluj ją ponownie.
 
+### „Most iframe i JSONP nie zwróciły danych”
+
+Wydanie 12.3.1 naprawia most dla zagnieżdżonych ramek Google Apps Script. Backend przekazuje odpowiedź do głównego okna PWA wraz z jednorazowym identyfikatorem żądania, a frontend przyjmuje ją tylko z domeny Google i tylko dla oczekiwanej operacji.
+
+Jeżeli komunikat nadal pojawia się na wersji 12.3.1:
+
+1. otwórz link **Test backendu** i potwierdź, że pojawia się JSON z `ok:true` albo `ok:false`;
+2. wyłącz dla tej strony blokadę skryptów, reklam, prywatny DNS lub filtr antywirusowy blokujący `script.google.com` i `googleusercontent.com`;
+3. sprawdź połączenie w innej sieci;
+4. użyj **Sprawdź aktualizację** i uruchom PWA ponownie.
+
 ### Brak grafiku dla osoby
 
 - sprawdź pisownię nazwiska i aliasy;
@@ -295,6 +306,12 @@ Uruchom w edytorze Apps Script `setupSecurityTokens()`, a następnie utwórz now
 - Calendar API v3 musi być włączone;
 - sprawdź historię wykonań i dzienny limit Calendar;
 - uruchom jednorazowo `syncVisibleWeeksToCalendar_()`.
+
+## Zmiany wydania 12.3.1
+
+- naprawiono przekazywanie `postMessage` przez zagnieżdżoną ramkę Google Apps Script do głównego okna PWA;
+- dodano jednorazowy identyfikator mostu i kontrolę domeny nadawcy, aby nie osłabić ochrony danych;
+- dodano test regresji protokołu iframe oraz podniesiono wersję cache PWA.
 
 ## Zmiany wydania 12.3.0
 

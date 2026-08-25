@@ -1,4 +1,4 @@
-const APP_VERSION = '12.3.0';
+const APP_VERSION = '12.3.1';
 const STORAGE_KEY = 'harmonogram-mow-state-v12';
 const LEGACY_STORAGE_KEYS = ['harmonogram-mow-state-v11', 'harmonogram-mow-state-v10', 'harmonogram-mow-state-v9', 'harmonogram-mow-state-v8'];
 const MAX_INTERNAT_CACHE_WEEKS = 8;
@@ -183,6 +183,36 @@ function normalizeBackendUrl(value) {
   url.search = '';
   url.hash = '';
   return url.toString();
+}
+
+function isAllowedBridgeOrigin(origin) {
+  try {
+    const url = new URL(String(origin || ''));
+    return url.protocol === 'https:' && (
+      url.hostname === 'script.google.com' ||
+      url.hostname.endsWith('.googleusercontent.com')
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+function isExpectedBridgeMessage(event, iframeWindow, bridgeNonce) {
+  const data = event && event.data;
+  if (!data || data.source !== 'harmonogram-mow-backend') return false;
+  if (event.source === iframeWindow) {
+    return !data.bridgeNonce || data.bridgeNonce === bridgeNonce;
+  }
+  return data.bridgeNonce === bridgeNonce && isAllowedBridgeOrigin(event.origin);
+}
+
+function createBridgeNonce() {
+  if (globalThis.crypto && typeof globalThis.crypto.getRandomValues === 'function') {
+    const values = new Uint32Array(4);
+    globalThis.crypto.getRandomValues(values);
+    return Array.from(values, value => value.toString(16).padStart(8, '0')).join('');
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 }
 
 function saveSettings(options = {}) {
@@ -1163,7 +1193,9 @@ function toLocalIsoDate(date) {
 function iframeBridge(baseUrl) {
   return new Promise((resolve, reject) => {
     const url = new URL(baseUrl);
+    const bridgeNonce = createBridgeNonce();
     url.searchParams.set('transport', 'bridge');
+    url.searchParams.set('bridgeNonce', bridgeNonce);
     url.searchParams.delete('callback');
     url.searchParams.set('_', String(Date.now()));
 
@@ -1189,9 +1221,8 @@ function iframeBridge(baseUrl) {
     }
 
     function onMessage(event) {
-      if (event.source !== iframe.contentWindow) return;
+      if (!isExpectedBridgeMessage(event, iframe.contentWindow, bridgeNonce)) return;
       const data = event.data;
-      if (!data || data.source !== 'harmonogram-mow-backend') return;
       completed = true;
       cleanup();
       resolve(data.payload);
