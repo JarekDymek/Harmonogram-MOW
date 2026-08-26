@@ -1,4 +1,4 @@
-const APP_VERSION = '12.3.2';
+const APP_VERSION = '12.4.0';
 const STORAGE_KEY = 'harmonogram-mow-state-v12';
 const LEGACY_STORAGE_KEYS = ['harmonogram-mow-state-v11', 'harmonogram-mow-state-v10', 'harmonogram-mow-state-v9', 'harmonogram-mow-state-v8'];
 const MAX_INTERNAT_CACHE_WEEKS = 8;
@@ -670,6 +670,8 @@ function normalizeInternatWeek(week = {}) {
     };
   });
   const names = Array.from(new Set(days.flatMap(day => day.shifts.map(shift => shift.educator)).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'pl'));
+  const computedShiftCount = days.reduce((sum, day) => sum + day.shifts.length, 0);
+  const computedTotalHours = round(days.reduce((sum, day) => sum + day.hoursDay, 0));
   return {
     ...week,
     weekStart,
@@ -678,10 +680,35 @@ function normalizeInternatWeek(week = {}) {
     range: week.range || `${formatShortDate(weekStart)} – ${formatShortDate(addDaysIso(weekStart, 6))}`,
     days,
     staff: Array.isArray(week.staff) && week.staff.length ? week.staff : names,
-    staffCount: numberOr(week.staffCount, names.length),
-    shiftCount: numberOr(week.shiftCount, days.reduce((sum, day) => sum + day.shifts.length, 0)),
-    totalHours: numberOr(week.totalHours, round(days.reduce((sum, day) => sum + day.hoursDay, 0)))
+    staffCount: names.length,
+    shiftCount: computedShiftCount,
+    totalHours: computedTotalHours,
+    validationWarnings: validateInternatWeekDays(days)
   };
+}
+
+function validateInternatWeekDays(days = []) {
+  const warnings = [];
+  days.forEach(day => {
+    const shifts = Array.isArray(day.shifts) ? day.shifts : [];
+    const groupKeys = new Set(shifts.map(shift => getInternatShiftGroup(shift).key));
+    const hasNumberedGroups = [...groupKeys].some(key => key.startsWith('group-'));
+    const hasVacationGroups = [...groupKeys].some(key => key.startsWith('vacation-'));
+    if (hasNumberedGroups && hasVacationGroups) {
+      warnings.push(`${day.name || day.isoDate}: jednocześnie wykryto grupy 1–8 i wakacyjne A/B.`);
+    }
+
+    const hoursByEducator = new Map();
+    shifts.forEach(shift => {
+      const educator = String(shift.educator || 'Nieznana osoba').trim();
+      hoursByEducator.set(educator, round((hoursByEducator.get(educator) || 0) + numberOr(shift.duration, 0)));
+    });
+    const impossible = [...hoursByEducator.entries()].filter(([, hours]) => hours > 24);
+    if (impossible.length) {
+      warnings.push(`${day.name || day.isoDate}: ${impossible.length} ${impossible.length === 1 ? 'osoba ma' : 'osoby mają'} ponad 24 h dyżurów.`);
+    }
+  });
+  return warnings;
 }
 
 function normalizeShift(shift) {
@@ -920,6 +947,9 @@ function renderInternatWeek(selectedWeek) {
   }
 
   const source = fullWeek.source || selectedWeek.source || 'Dokument internatu';
+  const validationNotice = fullWeek.validationWarnings?.length
+    ? `<section class="card danger-card internat-validation"><strong>Dane wymagają ponownego odczytu.</strong><span>${escapeHtml(fullWeek.validationWarnings.join(' '))}</span></section>`
+    : '';
   $('weekView').innerHTML = `
     <section class="card week-head internat-head">
       <div class="week-heading-copy">
@@ -933,6 +963,7 @@ function renderInternatWeek(selectedWeek) {
         <div class="metric"><span>Łącznie h</span><strong>${numberOr(fullWeek.totalHours, 0)}</strong></div>
       </div>
     </section>
+    ${validationNotice}
     <section class="internat-days">${(fullWeek.days || []).map(renderInternatDay).join('')}</section>`;
 }
 

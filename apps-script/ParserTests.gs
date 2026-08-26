@@ -67,6 +67,38 @@ function runParserTests() {
   assertEqual_(fullInternatWeek.staffCount, 3, 'full internat staff count');
   assertEqual_(fullInternatWeek.days[0].shifts.length, 3, 'full internat Monday shifts');
 
+  const schoolYearSample = [
+    'INTERNAT', '31.08 - 06.09.2026r.', '1.',
+    'I', '600-1400 Osoba Pierwsza',
+    'II', '600-1400 Osoba Druga',
+    'III', '600-1400 Osoba Trzecia',
+    'IV', '600-1400 Osoba Czwarta',
+    'V', '600-1400 Osoba Piąta',
+    'VI', '1430-2200 Dymek',
+    'VII', '600-1400 Osoba Siódma',
+    'VIII', '600-1400 Osoba Ósma',
+    'NOC',
+    '2200-600 Nocny Poniedziałek', '2200-600 Nocny Wtorek', '2200-600 Nocny Środa',
+    '2200-600 Nocny Czwartek', '2200-600 Nocny Piątek', '2200-600 Nocny Sobota', '2200-600 Nocny Niedziela',
+    'ZESTAWIENIE GODZIN PRACOWNIKÓW',
+    '600-800 Dymek', '600-1400 Dymek', '1430-1800 Dymek', '1500-1700 Dymek', '1600-1900 Dymek',
+    'GRUPA A', '600-1400 Dymek',
+    'GRUPA B', '1400-2200 Dymek'
+  ].join('\n');
+  const schoolYearDymek = parseInternatSchedule_(schoolYearSample, '2026-08-31', 'Dymek');
+  assertEqual_(schoolYearDymek.totalHours, 7.5, 'school year Dymek hours without trailing summary');
+  assertEqual_(schoolYearDymek.days.reduce(function (sum, day) { return sum + day.shifts.length; }, 0), 1, 'school year Dymek shift count');
+  assertEqual_(schoolYearDymek.days[0].shifts[0].label, 'Gr. VI', 'school year ignores vacation A/B markers');
+  const schoolNightTokens = extractSchoolYearNightTokens_(extractNightBlock_(schoolYearSample));
+  assertEqual_(schoolNightTokens.length, 7, 'school year night row limited to seven days');
+  assertEqual_(schoolNightTokens[6].dayIndex, 6, 'school year Sunday night index');
+
+  const invalidCalendarView = { days: [{ label: 'ND', shifts: [
+    { hoursValue: 16, startIso: '2026-09-06T06:00:00.000Z', endIso: '2026-09-06T22:00:00.000Z' },
+    { hoursValue: 10, startIso: '2026-09-06T12:00:00.000Z', endIso: '2026-09-06T22:00:00.000Z' }
+  ] }] };
+  assertEqual_(validateEducatorWeekForCalendar_(invalidCalendarView).length, 1, 'calendar rejects more than 24 hours per day');
+
   Logger.log('Parser tests OK');
 }
 
