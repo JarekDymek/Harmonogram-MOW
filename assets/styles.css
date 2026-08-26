@@ -378,6 +378,8 @@ html[data-layout="desktop"] .app-main { max-width: 1320px; }
 /* Pełny plan internatu */
 .internat-placeholder { text-align: center; }
 .internat-head .internat-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.internat-validation { display: grid; gap: 6px; margin-bottom: 14px; }
+.internat-validation span { line-height: 1.45; overflow-wrap: break-word; }
 .internat-days { display: grid; gap: 14px; margin-bottom: var(--pad); }
 .internat-day {
   overflow: hidden;

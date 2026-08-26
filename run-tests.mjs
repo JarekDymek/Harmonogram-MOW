@@ -108,7 +108,7 @@ await test('pełny plan grupuje dyżury i zachowuje aktualny cache', () => {
   const app = read('assets/app.js');
   const start = app.indexOf('function normalizeBackendUrl');
   const context = vm.createContext({ URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 8 });
-  new vm.Script(`${app.slice(start)}\n    globalThis.internatUi = { getInternatShiftGroup, groupInternatShifts, mergeInternatWeekCache };`
+  new vm.Script(`${app.slice(start)}\n    globalThis.internatUi = { getInternatShiftGroup, groupInternatShifts, mergeInternatWeekCache, validateInternatWeekDays };`
   ).runInContext(context);
   const api = context.internatUi;
 
@@ -123,6 +123,12 @@ await test('pełny plan grupuje dyżury i zachowuje aktualny cache', () => {
   assert.equal(grouped.length, 2);
   assert.equal(grouped[0].label, 'Grupa 6');
   assert.equal(grouped[0].hours, 10);
+
+  const mixedDays = [{ name: 'ND', shifts: [
+    { educator: 'Dymek', label: 'Gr. VI', type: 'vi', duration: 16 },
+    { educator: 'Dymek', label: 'Grupa A', type: 'wakacje', duration: 10 }
+  ] }];
+  assert.equal(context.internatUi.validateInternatWeekDays(mixedDays).length, 2, 'Widok ma ostrzegać o mieszaniu trybów i ponad 24 h');
 
   const cached = { '2026-08-10': { weekStart: '2026-08-10', sourceVersion: 'abc', days: [] } };
   const retained = api.mergeInternatWeekCache(cached, {}, [{ weekStart: '2026-08-10', sourceVersion: 'abc' }], false);
@@ -286,20 +292,20 @@ await test('synchronizacja kalendarza jest idempotentna i nie usuwa przed wstawi
   assert.equal(runtime.context.secondSync.unchanged, 1);
 });
 
-await test('interfejs 12.3.2 ma jedno menu, auto-synchronizację i wersjonowane zasoby', () => {
+await test('interfejs 12.4.0 ma jedno menu, auto-synchronizację i wersjonowane zasoby', () => {
   const html = read('index.html');
   const app = read('assets/app.js');
   const worker = read('service-worker.js');
   const sample = JSON.parse(read('data/sample-weeks.json'));
   const packageData = JSON.parse(read('package.json'));
-  assert.equal(packageData.version, '12.3.2');
+  assert.equal(packageData.version, '12.4.0');
   assert.equal((html.match(/id="actionsMenu"/g) || []).length, 1);
   assert.match(html, /<option value="internat">Cały internat<\/option>/);
-  assert.match(html, /assets\/app\.js\?v=12\.3\.2/);
-  assert.match(html, /assets\/styles\.css\?v=12\.3\.2/);
+  assert.match(html, /assets\/app\.js\?v=12\.4\.0/);
+  assert.match(html, /assets\/styles\.css\?v=12\.4\.0/);
   assert.match(app, /autoRefreshFromBackend\('start'\)/);
   assert.match(app, /state\.adminToken \? 'sync' : 'dashboard'/);
-  assert.match(worker, /APP_VERSION = '12\.3\.2'/);
+  assert.match(worker, /APP_VERSION = '12\.4\.0'/);
   assert.match(app, /searchParams\.set\('authuser', '0'\)/);
   assert.match(app, /<details class="internat-day/);
   assert.match(app, /<details class="internat-group/);

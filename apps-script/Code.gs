@@ -1,6 +1,6 @@
 const CONFIG = {
   appName: 'Harmonogram MOW',
-  backendVersion: '2026-08-25-nested-iframe-bridge-12.3.1',
+  backendVersion: '2026-08-26-school-year-parser-12.4.0',
   securityMode: 'token',
   sourceEmail: 'harmonogram@example.com',
   calendarId: 'primary',
@@ -750,7 +750,11 @@ function parseInternatSchedule_(text, weekStartIso, educator) {
   const who = normalizeEducatorInput_(educator || CONFIG.defaultEducator);
   const normalized = normalizeText_(text);
   const groupBlocks = extractGroupBlocks_(normalized);
-  const vacationGroupBlocks = extractVacationGroupBlocks_(normalized);
+  const isSchoolYearSchedule = Object.keys(groupBlocks).length > 0;
+  // Dokument szkolny zawiera grupy I-VIII, ale w dalszej części może również
+  // zawierać litery A/B (np. oznaczenia kolumn lub zestawienia). Nie wolno
+  // interpretować ich drugi raz jako wakacyjnych Grup A/B.
+  const vacationGroupBlocks = isSchoolYearSchedule ? {} : extractVacationGroupBlocks_(normalized);
   const days = makeEmptyDays_(weekStartIso);
   const usedMarkedVacationTable = parseMarkedVacationTable_(normalized, weekStartIso, who, days);
 
@@ -795,9 +799,11 @@ function parseInternatSchedule_(text, weekStartIso, educator) {
 
   const nightBlock = extractNightBlock_(normalized);
   if (nightBlock && !usedMarkedVacationTable) {
-    const nightTokens = Object.keys(vacationGroupBlocks).length
-      ? extractVacationNightTokens_(nightBlock)
-      : extractShiftTokens_(nightBlock);
+    const nightTokens = isSchoolYearSchedule
+      ? extractSchoolYearNightTokens_(nightBlock)
+      : Object.keys(vacationGroupBlocks).length
+        ? extractVacationNightTokens_(nightBlock)
+        : extractShiftTokens_(nightBlock);
     nightTokens.forEach(function (item, index) {
       if (!isSelectedEducator_(item.name, who)) return;
       const dayIndex = typeof item.dayIndex === 'number' ? item.dayIndex : Math.min(index, 6);
@@ -974,6 +980,17 @@ function extractVacationNightTokens_(nightBlock) {
   if (tokens.length) return tokens;
   return extractShiftTokens_(nightBlock).map(function (token, index) {
     return { start: token.start, end: token.end, name: token.name, dayIndex: getVacationNightFallbackDayIndex_(token, index) };
+  });
+}
+
+function extractSchoolYearNightTokens_(nightBlock) {
+  // W szkolnym układzie wiersz NOC ma po jednej komórce na każdy dzień.
+  // Tekst DOCX zawiera po nim jeszcze zestawienia godzin pracowników, które
+  // również wyglądają jak dyżury. Poprzedni parser czytał je do końca pliku i
+  // wszystkie nadmiarowe wpisy przypisywał do niedzieli. Pierwszych siedem
+  // tokenów odpowiada siedmiu kolumnom PON-ND; reszta nie należy do wiersza NOC.
+  return extractShiftTokens_(nightBlock).slice(0, 7).map(function (token, dayIndex) {
+    return { start: token.start, end: token.end, name: token.name, dayIndex: dayIndex };
   });
 }
 
@@ -1559,11 +1576,36 @@ function normalizeCalendarNightPart_(shift, start, end, nightPart) {
   return copy;
 }
 
+function validateEducatorWeekForCalendar_(view) {
+  const errors = [];
+  (view && Array.isArray(view.days) ? view.days : []).forEach(function (day) {
+    const shifts = Array.isArray(day.shifts) ? day.shifts : [];
+    const hours = round2_(shifts.reduce(function (sum, shift) {
+      return sum + Number(shift.hoursValue || shift.duration || 0);
+    }, 0));
+    if (hours > 24) {
+      errors.push((day.label || day.name || day.isoDate || 'Dzień') + ': ' + hours + ' h przekracza dobę');
+    }
+    shifts.forEach(function (shift) {
+      const start = new Date(shift.startIso);
+      const end = new Date(shift.endIso);
+      if (!isFinite(start.getTime()) || !isFinite(end.getTime()) || end <= start) {
+        errors.push((day.label || day.name || day.isoDate || 'Dzień') + ': nieprawidłowy przedział dyżuru');
+      }
+    });
+  });
+  return errors;
+}
+
 function syncWeekToCalendar_(weekStart) {
   const view = buildWeekView_(weekStart, CONFIG.calendarEducator);
   if (!view.hasData) {
     Logger.log('Brak dokumentów tygodnia do synchronizacji kalendarza: ' + weekStart);
     return;
+  }
+  const validationErrors = validateEducatorWeekForCalendar_(view);
+  if (validationErrors.length) {
+    throw new Error('Wstrzymano zapis nieprawidłowego grafiku do Kalendarza: ' + validationErrors.join('; '));
   }
 
   const timeMin = parseIsoDate_(weekStart).toISOString();
