@@ -1,7 +1,8 @@
-const APP_VERSION = '12.4.0';
+const APP_VERSION = '12.4.1';
 const STORAGE_KEY = 'harmonogram-mow-state-v12';
 const LEGACY_STORAGE_KEYS = ['harmonogram-mow-state-v11', 'harmonogram-mow-state-v10', 'harmonogram-mow-state-v9', 'harmonogram-mow-state-v8'];
 const MAX_INTERNAT_CACHE_WEEKS = 8;
+const INTERNAT_CACHE_SCHEMA = 'school-year-parser-v2';
 const DEFAULT_STATE = {
   backendUrl: '',
   viewToken: '',
@@ -120,7 +121,7 @@ function loadState() {
         history: Array.isArray(parsed.history) ? sortHistoryRows(parsed.history) : [],
         alerts: Array.isArray(parsed.alerts) ? parsed.alerts : [],
         changes: Array.isArray(parsed.changes) ? parsed.changes : [],
-        internatWeeks: parsed.internatWeeks && typeof parsed.internatWeeks === 'object' && !Array.isArray(parsed.internatWeeks) ? parsed.internatWeeks : {},
+        internatWeeks: migratePersistedInternatWeeks(parsed.internatWeeks),
         availableEducators: Array.isArray(parsed.availableEducators) ? parsed.availableEducators : [],
         seenAlertIds: Array.isArray(parsed.seenAlertIds) ? parsed.seenAlertIds : []
       };
@@ -592,8 +593,25 @@ function mergeInternatWeekCache(existing = {}, incoming = {}, weeks = [], hasInc
   });
 
   return Object.fromEntries(Object.entries(merged)
+    .filter(([, week]) => isInternatWeekCacheUsable(week))
     .sort(([left], [right]) => String(left).localeCompare(String(right)))
     .slice(-MAX_INTERNAT_CACHE_WEEKS));
+}
+
+function migratePersistedInternatWeeks(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value)
+    .filter(([, week]) => week && week.cacheSchema === INTERNAT_CACHE_SCHEMA)
+    .filter(([, week]) => isInternatWeekCacheUsable(week)));
+}
+
+function isInternatWeekCacheUsable(week) {
+  return Boolean(
+    week &&
+    week.cacheSchema === INTERNAT_CACHE_SCHEMA &&
+    Array.isArray(week.days) &&
+    !(week.validationWarnings || []).length
+  );
 }
 
 function repairMojibake(value) {
@@ -683,6 +701,7 @@ function normalizeInternatWeek(week = {}) {
     staffCount: names.length,
     shiftCount: computedShiftCount,
     totalHours: computedTotalHours,
+    cacheSchema: INTERNAT_CACHE_SCHEMA,
     validationWarnings: validateInternatWeekDays(days)
   };
 }
@@ -882,7 +901,15 @@ function getWeekCacheKey(week) {
 async function ensureInternatWeekLoaded() {
   const week = getActiveWeek();
   const weekStart = getWeekCacheKey(week);
-  if (!week || !weekStart || state.internatWeeks?.[weekStart]) return;
+  if (!week || !weekStart) return;
+  const cachedWeek = state.internatWeeks?.[weekStart];
+  if (isInternatWeekCacheUsable(cachedWeek)) return;
+  if (cachedWeek) {
+    const retained = { ...(state.internatWeeks || {}) };
+    delete retained[weekStart];
+    state.internatWeeks = retained;
+    persist();
+  }
   if (!state.backendUrl) {
     render();
     toast('Widok całego internatu wymaga połączenia z backendem albo danych testowych zawierających pełny plan.');
@@ -897,7 +924,11 @@ async function ensureInternatWeekLoaded() {
       if (payload?.ok === false) throw new Error(payload.error || 'backend zwrócił ok=false');
       const rawWeek = payload?.data?.internatWeek || payload?.internatWeek;
       if (!rawWeek || !Array.isArray(rawWeek.days)) throw new Error('backend nie zwrócił pełnego planu internatu');
-      state.internatWeeks = { ...(state.internatWeeks || {}), [weekStart]: normalizeInternatWeek(rawWeek) };
+      const normalizedWeek = normalizeInternatWeek(rawWeek);
+      if (!isInternatWeekCacheUsable(normalizedWeek)) {
+        throw new Error(`backend zwrócił dane wymagające ponownego odczytu: ${(normalizedWeek.validationWarnings || []).join(' ')}`);
+      }
+      state.internatWeeks = { ...(state.internatWeeks || {}), [weekStart]: normalizedWeek };
       state.backendError = '';
       persist();
       render();
