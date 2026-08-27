@@ -1,6 +1,6 @@
 const CONFIG = {
   appName: 'Harmonogram MOW',
-  backendVersion: '2026-08-26-school-year-parser-12.4.0',
+  backendVersion: '2026-08-27-school-year-parser-12.4.1',
   securityMode: 'token',
   sourceEmail: 'harmonogram@example.com',
   calendarId: 'primary',

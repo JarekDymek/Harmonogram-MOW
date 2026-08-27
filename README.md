@@ -2,7 +2,7 @@
 
 PWA do pobierania grafików internatu z Gmaila, odczytu plików DOCX, prezentowania dyżurów wychowawców oraz synchronizacji wybranych wpisów z Kalendarzem Google. Frontend jest statyczną aplikacją HTML/CSS/JavaScript, a backend działa w Google Apps Script.
 
-Aktualna wersja techniczna: **12.4.0**
+Aktualna wersja techniczna: **12.4.1**
 Ostatni pełny audyt: **26 sierpnia 2026**
 Repozytorium: [JarekDymek/Harmonogram-MOW](https://github.com/JarekDymek/Harmonogram-MOW)
 
@@ -225,7 +225,7 @@ Aktualny manifest używa osobnych, skalowalnych ikon SVG typu `any` i `maskable`
 
 ### Jak sprawdzić i wymusić aktualizację PWA
 
-Numer uruchomionego frontendu jest zawsze widoczny po rozwinięciu **Ustawienia**. Dla tego wydania powinien wynosić `12.4.0`.
+Numer uruchomionego frontendu jest zawsze widoczny po rozwinięciu **Ustawienia**. Dla tego wydania powinien wynosić `12.4.1`.
 
 Na komputerze:
 
@@ -286,13 +286,13 @@ Uruchom w edytorze Apps Script `setupSecurityTokens()`, a następnie utwórz now
 
 Wydanie 12.3.2 naprawia również routing wielu kont Google. Bez parametru `authuser=0` zalogowana przeglądarka mogła samoczynnie zamienić adres wdrożenia na trasę `/u/1/`, która pokazywała stronę „Nie można odnaleźć strony” zamiast odpowiedzi backendu. Wszystkie żądania aplikacji wymuszają teraz profil właściciela wdrożenia.
 
-Jeżeli komunikat nadal pojawia się na wersji 12.4.0:
+Jeżeli komunikat nadal pojawia się na wersji 12.4.1:
 
 1. otwórz link **Test backendu** i potwierdź, że pojawia się JSON z `ok:true` albo `ok:false`;
 2. wyłącz dla tej strony blokadę skryptów, reklam, prywatny DNS lub filtr antywirusowy blokujący `script.google.com` i `googleusercontent.com`;
 3. sprawdź połączenie w innej sieci;
 4. użyj **Sprawdź aktualizację** i uruchom PWA ponownie;
-5. sprawdź, czy numer w menu wynosi dokładnie `12.4.0`.
+5. sprawdź, czy numer w menu wynosi dokładnie `12.4.1`.
 
 ### Brak grafiku dla osoby
 
@@ -310,11 +310,12 @@ Jeżeli komunikat nadal pojawia się na wersji 12.4.0:
 - sprawdź historię wykonań i dzienny limit Calendar;
 - uruchom jednorazowo `syncVisibleWeeksToCalendar_()`.
 
-## Zmiany wydania 12.4.0
+## Zmiany wydania 12.4.1
 
 - dostosowano parser do powakacyjnego układu grafiku z grupami I–VIII;
 - szkolny grafik nie interpretuje już pomocniczych oznaczeń A/B jako dodatkowych grup wakacyjnych;
 - wiersz **NOC** jest ograniczony do siedmiu kolumn PON–ND, więc zestawienia godzin znajdujące się dalej w DOCX nie trafiają ponownie do niedzieli;
+- cache pełnego planu sprzed poprawki parsera jest automatycznie odrzucany i pobierany ponownie bez usuwania tokenów, ustawień ani historii;
 - frontend niezależnie przelicza liczbę dyżurów i godzin oraz ostrzega o mieszaniu trybów grup i przekroczeniu 24 godzin jednej osoby w ciągu dnia;
 - synchronizacja Calendar zostaje wstrzymana przed jakąkolwiek zmianą, jeżeli odczytany dzień jednej osoby przekracza 24 godziny lub zawiera nieprawidłowy przedział;
 - dodano test regresji odwzorowujący nowy szkolny dokument i nadmiarowe zestawienie po wierszu nocnym;
