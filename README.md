@@ -407,3 +407,11 @@ Naprawione problemy o najwyższym wpływie:
 - nie rozszerzaj listy domen backendu bez przeglądu bezpieczeństwa;
 - nie dodawaj zasobu do PWA bez decyzji, czy powinien działać offline;
 - traktuj `VIEW_TOKEN` jak hasło do danych, a `ADMIN_TOKEN` jak klucz administracyjny.
+
+## Poprawka źródła poczty i korekt — 15 września 2026
+
+Kod Apps Script wyszukuje nowego nadawcę `dariusz.gorski@mowmalbork.pl` oraz przekazania z `dymek.jaroslaw@mowmalbork.pl`; każda wiadomość w znalezionym wątku jest sprawdzana osobno. Zagnieżdżone przekazania zachowują datę oryginału do ustalania kolejności dokumentów. Starszy dokument o wyższym priorytecie nie wypiera już nowszej korekty. Pełna korekta bez dyżurów wskazanej osoby nie powoduje powrotu do starego grafiku.
+
+Publikacja kodu w GitHub nie aktualizuje samoczynnie działającego Apps Script. Plik `apps-script/Code.gs` wymaga podmiany i utworzenia nowej wersji istniejącego wdrożenia Google. Asystent MOW od wersji 2.5.2 pobiera swój widok Grafik bezpośrednio przez działający backend IMAP i nie zależy od tego wdrożenia.
+
+Test regresji tej zmiany: `node test-mail-forwarding.mjs` (nadawca, przekazania, data oryginału i pierwszeństwo korekty). Pełne `npm run check` ma wcześniejszy, niezależny błąd w `apps-script/ParserTests.gs:44` (`thursdayLateShift` jest niezdefiniowany); ten sam błąd występuje przed zmianą.

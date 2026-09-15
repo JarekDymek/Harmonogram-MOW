@@ -1,8 +1,9 @@
 const CONFIG = {
   appName: 'Harmonogram MOW',
-  backendVersion: '2026-08-27-school-year-parser-12.4.1',
+  backendVersion: '2026-09-15-director-forwarding',
   securityMode: 'token',
-  sourceEmail: 'harmonogram@example.com',
+  sourceEmail: 'dariusz.gorski@mowmalbork.pl',
+  forwardingEmail: 'dymek.jaroslaw@mowmalbork.pl',
   calendarId: 'primary',
   defaultEducator: 'Dymek',
   calendarEducator: 'Dymek',
@@ -376,8 +377,41 @@ function isWeekInDashboardWindow_(weekStartIso) {
   return weekEnd >= minDate && weekStart <= maxDate;
 }
 
+
+function directorMailQuery_() {
+  return '{from:' + CONFIG.sourceEmail + ' from:' + CONFIG.forwardingEmail + '}';
+}
+
+function directorAddress_(value) {
+  const text = String(value || '').trim();
+  const match = text.match(/<([^<>\s]+@[^<>\s]+)>\s*$/);
+  return String(match ? match[1] : /^[^\s<>@]+@[^\s<>@]+$/.test(text) ? text : '').toLowerCase();
+}
+
+function resolveDirectorMessage_(message) {
+  const sender = directorAddress_(message.getFrom());
+  if (sender === CONFIG.sourceEmail) return { date: message.getDate() };
+  if (sender !== CONFIG.forwardingEmail) return null;
+  const lines = String(message.getPlainBody() || '').split(/\r?\n/).map(function (line) { return line.replace(/^\s*(?:>\s*)+/, '').trim(); });
+  for (let i = 0; i < lines.length; i++) {
+    const from = lines[i].match(/^(?:Od|From):\s*(.+)$/i);
+    if (!from) continue;
+    const address = directorAddress_(from[1]);
+    if (address === CONFIG.forwardingEmail) continue;
+    if (address !== CONFIG.sourceEmail) return null;
+    const dateLine = lines.slice(i + 1, i + 4).find(function (line) { return /^(?:Date|Data|Sent|Wysłano):/i.test(line); });
+    if (!dateLine) return null;
+    const value = dateLine.replace(/^[^:]+:\s*/, '');
+    const polish = value.match(/(\d{1,2})\s+(sty|lut|mar|kwi|maj|cze|lip|sie|wrz|paź|lis|gru)\S*\s+(20\d{2})(?:\s+o\s+(\d{1,2}):(\d{2}))?/i);
+    const months = ['sty','lut','mar','kwi','maj','cze','lip','sie','wrz','paź','lis','gru'];
+    const date = polish ? new Date(Number(polish[3]), months.indexOf(polish[2].toLowerCase()), Number(polish[1]), Number(polish[4] || 0), Number(polish[5] || 0)) : new Date(value);
+    return { date: isNaN(date.getTime()) ? message.getDate() : date };
+  }
+  return null;
+}
+
 function scanMailbox_() {
-  const query = ['from:' + CONFIG.sourceEmail, '(grafik OR grafiki OR harmonogram OR aktualizacja OR korekta OR zastępstwo)', 'has:attachment', 'newer_than:' + CONFIG.scanQueryDays + 'd'].join(' ');
+  const query = [directorMailQuery_(), '(grafik OR grafiki OR harmonogram OR aktualizacja OR korekta OR zastępstwo)', 'has:attachment', 'newer_than:' + CONFIG.scanQueryDays + 'd'].join(' ');
   Logger.log('GmailApp query: ' + query);
   Logger.log('Okno skanowania tygodni: od ' + toIsoDate_(addDays_(startOfDay_(new Date()), -CONFIG.scanPastDays)) + ' do ' + toIsoDate_(addDays_(startOfDay_(new Date()), CONFIG.scanFutureDays)));
 
@@ -401,8 +435,10 @@ function scanMailbox_() {
     thread.getMessages().forEach(function (message) {
       messagesSeen++;
       try {
+        const origin = resolveDirectorMessage_(message);
+        if (!origin) return;
         const subject = message.getSubject() || '';
-        const messageDate = message.getDate();
+        const messageDate = origin.date;
         const messageId = message.getId();
         const attachments = message.getAttachments({ includeInlineImages: false, includeAttachments: true });
 
@@ -568,7 +604,7 @@ function scoreScheduleSource_(source, text) {
   const hasVacationGroup = /\n\s*GRUPA\s+[A-Z]\s*(?:\n|\s)/i.test(text);
   const hasGroupVI = /\n\s*VI\s*(?:\n|\s)/i.test(text);
   const hasNight = /\n\s*NOC\s*(?:\n|\s)/i.test(text);
-  const isCorrection = combined.indexOf('korekta') !== -1 || combined.indexOf('poprawka') !== -1 || combined.indexOf('zmiana') !== -1;
+  const isCorrection = combined.indexOf('korekta') !== -1 || combined.indexOf('poprawka') !== -1 || combined.indexOf('zmiana') !== -1 || combined.indexOf('aktualiz') !== -1;
   const isCorrectionGr6 = isCorrection && (combined.indexOf('gr 6') !== -1 || combined.indexOf('grupa 6') !== -1 || combined.indexOf('gr vi') !== -1);
   const looksLikeTeamSchedule = combined.indexOf('grafik zespolu') !== -1 || combined.indexOf('godziny pracy zespolu') !== -1 || /Godziny pracy zespołu/i.test(text);
 
@@ -683,10 +719,11 @@ function deleteLargeJsonProperty_(key) {
 function compareDocs_(a, b) {
   const pa = a && a.source ? Number(a.source.priority || 0) : 0;
   const pb = b && b.source ? Number(b.source.priority || 0) : 0;
-  if (pb !== pa) return pb - pa;
   const da = new Date(a && a.source ? a.source.messageDate || a.updatedAt || 0 : 0).getTime();
   const db = new Date(b && b.source ? b.source.messageDate || b.updatedAt || 0 : 0).getTime();
-  return db - da;
+  if (db !== da) return db - da;
+  if (isCorrectionDocument_(a) !== isCorrectionDocument_(b)) return isCorrectionDocument_(b) ? 1 : -1;
+  return pb - pa;
 }
 
 function buildDocsVersion_(docs) {
@@ -699,7 +736,7 @@ function buildDocsVersion_(docs) {
 
 function isCorrectionDocument_(doc) {
   const s = normalizeName_((doc.source.filename || '') + ' ' + (doc.source.subject || '') + ' ' + (doc.source.kind || ''));
-  return s.indexOf('korekta') !== -1 || s.indexOf('poprawka') !== -1 || s.indexOf('zmiana') !== -1 || s.indexOf('correction') !== -1;
+  return s.indexOf('korekta') !== -1 || s.indexOf('poprawka') !== -1 || s.indexOf('zmiana') !== -1 || s.indexOf('correction') !== -1 || s.indexOf('aktualiz') !== -1;
 }
 
 function createChangeAlert_(doc, previousTop) {
@@ -1063,7 +1100,7 @@ function chooseBestPlanForEducator_(docs, weekStart, educator) {
   for (let i = 0; i < sorted.length; i++) {
     const doc = sorted[i];
     const parsed = parseInternatSchedule_(doc.rawText || '', weekStart, educator);
-    if (parsed.totalHours > 0) {
+    if (parsed.totalHours > 0 || (isCorrectionDocument_(doc) && doc.source.kind === 'correction-internat')) {
       return { doc: doc, parsed: parsed, found: true };
     }
   }
@@ -1307,7 +1344,7 @@ function simplifyEducatorName_(name) {
 
 function syncDirectorInfoToCalendar_() {
   pruneTimestampedProperties_('infoCalendar:', CONFIG.infoCalendarMarkerRetentionDays);
-  const query = ['from:' + CONFIG.sourceEmail, 'newer_than:' + CONFIG.infoCalendarLookbackDays + 'd'].join(' ');
+  const query = [directorMailQuery_(), 'newer_than:' + CONFIG.infoCalendarLookbackDays + 'd'].join(' ');
   const threads = GmailApp.search(query, 0, CONFIG.infoCalendarMaxThreads);
   const minDate = addDays_(startOfDay_(new Date()), -7);
   const maxDate = addDays_(startOfDay_(new Date()), CONFIG.infoCalendarLookaheadDays);
@@ -1320,13 +1357,15 @@ function syncDirectorInfoToCalendar_() {
 
   threads.forEach(function (thread) {
     thread.getMessages().forEach(function (message) {
+      const origin = resolveDirectorMessage_(message);
+      if (!origin) return;
       scanned++;
       const subject = String(message.getSubject() || '');
       const body = String(message.getPlainBody() || '');
       const sourceText = normalizeText_(subject + '\n' + body).slice(0, 20000);
       if (isScheduleInfoCalendarText_(sourceText)) return;
 
-      extractDirectorInfoEvents_(sourceText, subject, message.getDate()).forEach(function (item) {
+      extractDirectorInfoEvents_(sourceText, subject, origin.date).forEach(function (item) {
         candidates++;
         if (item.start < minDate || item.start > maxDate) {
           skipped++;
