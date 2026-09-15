@@ -1,10 +1,10 @@
 {
-  "id": "./",
+  "id": "/Harmonogram-MOW/",
   "name": "Harmonogram MOW",
   "short_name": "Harmonogram",
   "lang": "pl",
-  "start_url": "./",
-  "scope": "./",
+  "start_url": "/Harmonogram-MOW/",
+  "scope": "/Harmonogram-MOW/",
   "display": "standalone",
   "background_color": "#050505",
   "theme_color": "#050505",

@@ -2,7 +2,7 @@
 
 PWA do pobierania grafików internatu z Gmaila, odczytu plików DOCX, prezentowania dyżurów wychowawców oraz synchronizacji wybranych wpisów z Kalendarzem Google. Frontend jest statyczną aplikacją HTML/CSS/JavaScript, a backend działa w Google Apps Script.
 
-Aktualna wersja techniczna: **12.4.1**
+Aktualna wersja frontendu: **12.4.2**
 Ostatni pełny audyt: **26 sierpnia 2026**
 Repozytorium: [JarekDymek/Harmonogram-MOW](https://github.com/JarekDymek/Harmonogram-MOW)
 
@@ -15,7 +15,7 @@ Repozytorium: [JarekDymek/Harmonogram-MOW](https://github.com/JarekDymek/Harmono
 - pokazuje godziny, nadgodziny, pracę weekendową, zmiany i ostrzeżenia;
 - przechowuje historię tygodni oraz listę wykrytych wychowawców;
 - synchronizuje Kalendarz Google wyłącznie dla `CONFIG.calendarEducator`;
-- po każdym uruchomieniu automatycznie pobiera dane, a z `ADMIN_TOKEN` także skanuje Gmail i uzgadnia Kalendarz;
+- po każdym uruchomieniu automatycznie pobiera zapisane dane backendu; ręczna synchronizacja z `ADMIN_TOKEN` skanuje Gmail i uzgadnia Kalendarz;
 - udostępnia na żądanie pełny plan całego internatu dla wybranego tygodnia w układzie dzień → grupa → dyżury;
 - działa jako instalowalna PWA oraz udostępnia ostatnio zapisany widok offline;
 - rozróżnia dostęp tylko do odczytu (`VIEW_TOKEN`) od administracyjnego (`ADMIN_TOKEN`).
@@ -103,7 +103,7 @@ Górny pasek zawiera jeden przycisk **Ustawienia**. Rozwijane menu zachowuje rę
 
 Po zimnym uruchomieniu aplikacja automatycznie:
 
-- wywołuje `sync`, jeśli na urządzeniu zapisano `ADMIN_TOKEN`;
+- pobiera `dashboard` także z `ADMIN_TOKEN`; skanowanie i synchronizacja pozostają dostępną ręcznie akcją;
 - wywołuje tylko `dashboard`, jeśli zapisano wyłącznie `VIEW_TOKEN`;
 - nie łączy się z backendem, jeśli nie ma URL albo tokenu;
 - ponawia odświeżenie po powrocie do aplikacji, gdy była w tle dłużej niż 5 minut.
@@ -415,3 +415,9 @@ Kod Apps Script wyszukuje nowego nadawcę `dariusz.gorski@mowmalbork.pl` oraz pr
 Publikacja kodu w GitHub nie aktualizuje samoczynnie działającego Apps Script. Plik `apps-script/Code.gs` wymaga podmiany i utworzenia nowej wersji istniejącego wdrożenia Google. Asystent MOW od wersji 2.5.2 pobiera swój widok Grafik bezpośrednio przez działający backend IMAP i nie zależy od tego wdrożenia.
 
 Test regresji tej zmiany: `node test-mail-forwarding.mjs` (nadawca, przekazania, data oryginału i pierwszeństwo korekty). Pełne `npm run check` ma wcześniejszy, niezależny błąd w `apps-script/ParserTests.gs:44` (`thursdayLateShift` jest niezdefiniowany); ten sam błąd występuje przed zmianą.
+
+## Poprawka odczytu 12.4.2
+
+[Uruchom i zainstaluj Harmonogram MOW](https://jarekdymek.github.io/Harmonogram-MOW/).
+
+Automatyczny start pobiera zapisany dashboard również przy ustawionym tokenie administratora. Wyświetlenie istniejących danych nie czeka już na skanowanie Gmaila, konwersję DOCX i zapis Kalendarza. Ręczny przycisk synchronizacji nadal uruchamia te operacje; wyzwalacz backendu pozostaje odpowiedzialny za cykliczne pobieranie poczty. Zmiana frontendu nie wymaga nowego wdrożenia Apps Script. Wcześniejsze poprawki kodu backendu wymagają osobnego wdrożenia w Google.

@@ -1,10 +1,10 @@
-const APP_VERSION = '12.4.1';
+const APP_VERSION = '12.4.2';
 const STORAGE_KEY = 'harmonogram-mow-state-v12';
 const LEGACY_STORAGE_KEYS = ['harmonogram-mow-state-v11', 'harmonogram-mow-state-v10', 'harmonogram-mow-state-v9', 'harmonogram-mow-state-v8'];
 const MAX_INTERNAT_CACHE_WEEKS = 8;
 const INTERNAT_CACHE_SCHEMA = 'school-year-parser-v2';
 const DEFAULT_STATE = {
-  backendUrl: '',
+  backendUrl: 'https://script.google.com/macros/s/AKfycbwBTAjRfp5cK5oRvDZ0oRAJ_zrxzsqE_4v7pgvrpMZYcXQovb9Fd7JWlQggYEVkotBwBA/exec',
   viewToken: '',
   adminToken: '',
   layoutMode: 'auto',
@@ -424,8 +424,8 @@ async function refreshFromBackend(options = {}) {
   const button = $('refreshBtn');
   if (button) button.disabled = true;
   try {
-    const action = state.adminToken ? 'sync' : 'dashboard';
-    toast(state.adminToken
+    const action = state.adminToken && !options.automatic ? 'sync' : 'dashboard';
+    toast(action === 'sync'
       ? (options.automatic ? 'Automatyczna synchronizacja przy uruchomieniu…' : 'Synchronizuję Gmail i Kalendarz…')
       : 'Pobieram widok z backendu bez zapisu do kalendarza…');
     const payload = await requestBackend(backendUrlWithParams(action));
@@ -434,7 +434,7 @@ async function refreshFromBackend(options = {}) {
     applyPayload(dashboard);
     if (state.dayFilter === 'internat') await ensureInternatWeekLoaded();
     const suffix = (state.educator || 'Dymek') === (state.calendarEducator || 'Dymek') ? '' : ' Kalendarz Google pozostał tylko dla ' + (state.calendarEducator || 'Dymek') + '.';
-    toast((state.adminToken ? 'Synchronizacja zakończona.' : 'Widok pobrany.') + suffix);
+    toast((action === 'sync' ? 'Synchronizacja zakończona.' : 'Widok pobrany.') + suffix);
   } catch (error) {
     state.backendError = error.message;
     persist();
