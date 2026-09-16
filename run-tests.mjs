@@ -409,5 +409,17 @@ await test('skan poczty nie blokuje korekt za już przetworzonymi załącznikami
   assert.equal(context.scanMailbox_().attachmentsAttempted, 0);
 });
 
+await test('zastępstwo zapisane małym z zachowuje wychowawcę i godziny', () => {
+  const context = vm.createContext({});
+  vm.runInContext(read('apps-script/Code.gs'), context);
+  for (const prefix of ['zast.', 'Zast.']) {
+    const tokens = context.extractShiftTokens_('1800-2200\n' + prefix + ' Dymek');
+    assert.equal(tokens.length, 1);
+    assert.equal(tokens[0].name, 'Dymek');
+    assert.equal(tokens[0].start.hour, 18);
+    assert.equal(tokens[0].end.hour, 22);
+  }
+});
+
 console.log(`OK — ${results.length} zestawów testów`);
 for (const name of results) console.log(`  ✓ ${name}`);
