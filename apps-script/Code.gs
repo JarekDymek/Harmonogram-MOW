@@ -1,6 +1,6 @@
 const CONFIG = {
   appName: 'Harmonogram MOW',
-  backendVersion: '2026-09-16-scan-limit',
+  backendVersion: '2026-09-16-scan-and-substitution',
   securityMode: 'token',
   sourceEmail: 'dariusz.gorski@mowmalbork.pl',
   forwardingEmail: 'dymek.jaroslaw@mowmalbork.pl',
@@ -1764,7 +1764,7 @@ function extractShiftTokens_(block) {
     .replace(/(\d)\s+(\d{2})(?=\s*-)/g, '$1$2')
     .replace(/-\s*(\d)\s+(\d{2})/g, '-$1$2')
     .replace(/(\d{1,2})\s+(\d{2})\s+([A-ZĄĆĘŁŃÓŚŹŻ])/g, '$1$2 $3');
-  const re = /(\d{1,2}\s*[:.]?\s*\d{0,2})\s*-\s*(\d{1,2}\s*[:.]?\s*\d{0,2})\s+((?:Zast\.\s*)?[A-ZĄĆĘŁŃÓŚŹŻ][A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż.\- ]{1,45})/g;
+  const re = /(\d{1,2}\s*[:.]?\s*\d{0,2})\s*-\s*(\d{1,2}\s*[:.]?\s*\d{0,2})\s+((?:[Zz]ast\.\s*)?[A-ZĄĆĘŁŃÓŚŹŻ][A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż.\- ]{1,45})/g;
   const tokens = [];
   let match;
   while ((match = re.exec(clean)) !== null) {
