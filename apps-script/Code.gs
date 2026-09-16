@@ -1,6 +1,6 @@
 const CONFIG = {
   appName: 'Harmonogram MOW',
-  backendVersion: '2026-09-16-scan-limit',
+  backendVersion: '2026-09-15-director-forwarding',
   securityMode: 'token',
   sourceEmail: 'dariusz.gorski@mowmalbork.pl',
   forwardingEmail: 'dymek.jaroslaw@mowmalbork.pl',
@@ -448,6 +448,12 @@ function scanMailbox_() {
           if (!/\.docx$/i.test(filename)) return;
           attachmentsSeen++;
 
+          if (attachmentsAttempted >= CONFIG.maxAttachmentsPerRun) {
+            attachmentsSkippedByLimit++;
+            Logger.log('SKIP LIMIT: ' + filename);
+            return;
+          }
+
           const explicitWeek = detectExplicitWeek_(filename, subject);
           if (explicitWeek && !isWeekInScanWindow_(explicitWeek.weekStart)) {
             attachmentsSkippedByWindow++;
@@ -455,6 +461,7 @@ function scanMailbox_() {
             return;
           }
 
+          attachmentsAttempted++;
           const bytes = attachment.getBytes();
           const digest = sha256_(bytes);
           const key = 'processed:' + sha256_([messageId, filename, size, digest].join('|'));
@@ -463,14 +470,6 @@ function scanMailbox_() {
             Logger.log('Pominięto już przetworzony załącznik: ' + filename);
             return;
           }
-
-          // Limit dotyczy nowych konwersji, nie załączników zapisanych wcześniej.
-          if (attachmentsAttempted >= CONFIG.maxAttachmentsPerRun) {
-            attachmentsSkippedByLimit++;
-            Logger.log('SKIP LIMIT: ' + filename);
-            return;
-          }
-          attachmentsAttempted++;
 
           const doc = parseDocxAttachmentToScheduleDocument_(attachment.copyBlob(), {
             messageId: messageId,

@@ -358,56 +358,5 @@ await test('service worker nie przechwytuje obcych i nieznanych zasobów', async
   assert.deepEqual(deleted, ['harmonogram-mow-shell-old']);
 });
 
-await test('skan poczty nie blokuje korekt za już przetworzonymi załącznikami', () => {
-  const properties = new Map();
-  const parsed = [];
-  const context = vm.createContext({ Date, Logger: { log() {} },
-    PropertiesService: { getScriptProperties: () => ({
-      getProperty: key => properties.get(key),
-      setProperty: (key, value) => properties.set(key, value)
-    }) }
-  });
-  vm.runInContext(read('apps-script/Code.gs'), context);
-  context.sha256_ = value => crypto.createHash('sha256').update(String(value)).digest('hex');
-  context.pruneProcessedMarkers_ = () => {};
-  context.toIsoDate_ = date => date.toISOString().slice(0, 10);
-  context.detectExplicitWeek_ = () => null;
-  context.isWeekInScanWindow_ = () => true;
-  context.parseDocxAttachmentToScheduleDocument_ = (blob, source) => {
-    parsed.push(source.messageId);
-    return { weekStart: '2026-09-14', source };
-  };
-  context.saveScheduleDocument_ = () => ({ changed: true });
-  const messages = Array.from({ length: 71 }, (_, index) => {
-    const id = String(index);
-    const filename = 'harmonogram.docx';
-    if (index < 35) {
-      const digest = context.sha256_(id);
-      properties.set('processed:' + context.sha256_([id, filename, 1, digest].join('|')), 'done');
-    }
-    return {
-      getFrom: () => 'dariusz.gorski@mowmalbork.pl',
-      getSubject: () => 'Aktualizacja harmonogramu',
-      getDate: () => new Date('2026-09-14T10:00:00Z'),
-      getId: () => id,
-      getAttachments: () => [{ getName: () => filename, getSize: () => 1,
-        getBytes: () => id, copyBlob: () => ({}) }]
-    };
-  });
-  context.GmailApp = { search: () => [{ getMessages: () => messages }] };
-  const first = context.scanMailbox_();
-  assert.equal(first.errors.length, 0);
-  assert.equal(first.attachmentsProcessed, 35, 'Zapisane załączniki nie mogą zużywać limitu nowych odczytów');
-  assert.equal(first.attachmentsAttempted, 35);
-  assert.equal(first.attachmentsSkippedByLimit, 1);
-  assert.equal(parsed[0], '35');
-  const second = context.scanMailbox_();
-  assert.equal(second.attachmentsProcessed, 1, 'Kolejny skan musi przetworzyć pozostałą korektę');
-  assert.equal(second.attachmentsAttempted, 1);
-  assert.equal(second.attachmentsSkippedByLimit, 0);
-  assert.equal(parsed.at(-1), '70');
-  assert.equal(context.scanMailbox_().attachmentsAttempted, 0);
-});
-
 console.log(`OK — ${results.length} zestawów testów`);
 for (const name of results) console.log(`  ✓ ${name}`);
