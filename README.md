@@ -1,8 +1,8 @@
 # Harmonogram MOW
 
-PWA do pobierania grafików internatu z Gmaila, odczytu plików DOCX, prezentowania dyżurów wychowawców oraz synchronizacji wybranych wpisów z Kalendarzem Google. Frontend jest statyczną aplikacją HTML/CSS/JavaScript, a backend działa w Google Apps Script.
+PWA do pobierania grafików internatu z Gmaila, odczytu plików DOCX, prezentowania dyżurów wychowawców oraz synchronizacji wybranych wpisów z Kalendarzem Google. Frontend jest statyczną aplikacją HTML/CSS/JavaScript. Podstawowe odświeżanie grafiku korzysta z backendu Render/IMAP Asystenta MOW, a Google Apps Script pozostaje ścieżką awaryjną i obsługuje funkcje Kalendarza.
 
-Aktualna wersja frontendu: **12.4.2**
+Aktualna wersja frontendu: **12.4.3**
 Ostatni pełny audyt: **26 sierpnia 2026**
 Repozytorium: [JarekDymek/Harmonogram-MOW](https://github.com/JarekDymek/Harmonogram-MOW)
 
@@ -421,3 +421,12 @@ Test regresji tej zmiany: `node test-mail-forwarding.mjs` (nadawca, przekazania,
 [Uruchom i zainstaluj Harmonogram MOW](https://jarekdymek.github.io/Harmonogram-MOW/).
 
 Automatyczny start pobiera zapisany dashboard również przy ustawionym tokenie administratora. Wyświetlenie istniejących danych nie czeka już na skanowanie Gmaila, konwersję DOCX i zapis Kalendarza. Ręczny przycisk synchronizacji nadal uruchamia te operacje; wyzwalacz backendu pozostaje odpowiedzialny za cykliczne pobieranie poczty. Zmiana frontendu nie wymaga nowego wdrożenia Apps Script. Wcześniejsze poprawki kodu backendu wymagają osobnego wdrożenia w Google.
+
+
+## Zmiany 12.4.3
+
+- odświeżanie grafiku najpierw korzysta z `https://asmow.onrender.com/api/schedule-dashboard`;
+- token synchronizacji poczty jest współdzielony lokalnie z Asystentem MOW w tym samym origin GitHub Pages;
+- Apps Script iframe/JSONP jest używany tylko jako fallback;
+- widok całego internatu pobiera dane z tego samego źródła Render/IMAP;
+- podbito wersję cache PWA do 12.4.3.
