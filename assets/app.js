@@ -1,8 +1,9 @@
-const APP_VERSION = '12.4.2';
+const APP_VERSION = '12.4.3';
 const STORAGE_KEY = 'harmonogram-mow-state-v12';
 const LEGACY_STORAGE_KEYS = ['harmonogram-mow-state-v11', 'harmonogram-mow-state-v10', 'harmonogram-mow-state-v9', 'harmonogram-mow-state-v8'];
 const MAX_INTERNAT_CACHE_WEEKS = 8;
 const INTERNAT_CACHE_SCHEMA = 'school-year-parser-v2';
+const MAIL_SCHEDULE_BACKEND_URL = 'https://asmow.onrender.com/api/schedule-dashboard';
 const DEFAULT_STATE = {
   backendUrl: 'https://script.google.com/macros/s/AKfycbwBTAjRfp5cK5oRvDZ0oRAJ_zrxzsqE_4v7pgvrpMZYcXQovb9Fd7JWlQggYEVkotBwBA/exec',
   viewToken: '',
@@ -88,7 +89,7 @@ if (actionsMenu) actionsMenu.querySelectorAll('button').forEach(button => {
 hydrateSettings();
 render();
 initializePwa();
-if (state.backendUrl && (state.adminToken || state.viewToken)) {
+if (getSharedMailScheduleToken() || (state.backendUrl && (state.adminToken || state.viewToken))) {
   queueMicrotask(() => autoRefreshFromBackend('start'));
 } else if (!state.weeks.length) {
   loadSampleData(false);
@@ -167,6 +168,42 @@ function hydrateSettings() {
   renderEducatorDatalist();
   applyLayoutMode();
   updateInstallUi();
+}
+
+function getSharedMailScheduleToken() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('mow_current_info_sync_v1') || '{}');
+    return String(parsed.token || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+async function requestMailScheduleDashboard(baseUrl) {
+  const token = getSharedMailScheduleToken();
+  if (!token) throw new Error('brak tokenu synchronizacji poczty Asystenta MOW');
+
+  const sourceUrl = new URL(String(baseUrl));
+  const action = String(sourceUrl.searchParams.get('action') || 'dashboard');
+  const educator = String(sourceUrl.searchParams.get('educator') || state.educator || 'Dymek');
+  const weekStart = String(sourceUrl.searchParams.get('weekStart') || '');
+
+  const response = await fetch(MAIL_SCHEDULE_BACKEND_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, educator })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || `HTTP ${response.status}`);
+  }
+
+  if (action === 'internat') {
+    const internatWeek = payload?.data?.internatWeeks?.[weekStart] || payload?.internatWeeks?.[weekStart];
+    if (!internatWeek) throw new Error('backend Render nie zwrócił planu całego internatu dla wybranego tygodnia');
+    return { ok: true, action: 'internat', data: { internatWeek }, internatWeek };
+  }
+  return payload;
 }
 
 function normalizeBackendUrl(value) {
@@ -402,7 +439,7 @@ async function loadSampleData(showToast = true) {
 }
 
 async function autoRefreshFromBackend(reason = 'start') {
-  if (!state.backendUrl || (!state.adminToken && !state.viewToken)) return;
+  if (!getSharedMailScheduleToken() && (!state.backendUrl || (!state.adminToken && !state.viewToken))) return;
   if (automaticRefreshPromise) return automaticRefreshPromise;
   automaticRefreshPromise = refreshFromBackend({ automatic: true, reason });
   try {
@@ -414,9 +451,9 @@ async function autoRefreshFromBackend(reason = 'start') {
 
 async function refreshFromBackend(options = {}) {
   if (!saveSettings({ silent: true })) return;
-  if (!state.backendUrl) {
+  if (!state.backendUrl && !getSharedMailScheduleToken()) {
     if (!options.automatic) {
-      toast('Najpierw wpisz adres backendu Apps Script w ustawieniach.');
+      toast('Brak źródła aktualizacji. Otwórz Asystenta MOW i zapisz token synchronizacji poczty.');
       $('settingsPanel').classList.remove('hidden');
     }
     return;
@@ -447,8 +484,8 @@ async function refreshFromBackend(options = {}) {
 
 async function loadDashboardOnly() {
   if (!saveSettings({ silent: true })) return;
-  if (!state.backendUrl) {
-    toast('Najpierw wpisz adres backendu Apps Script w ustawieniach.');
+  if (!state.backendUrl && !getSharedMailScheduleToken()) {
+    toast('Brak źródła aktualizacji. Otwórz Asystenta MOW i zapisz token synchronizacji poczty.');
     $('settingsPanel').classList.remove('hidden');
     return;
   }
@@ -472,17 +509,32 @@ async function loadDashboardOnly() {
 }
 
 async function requestBackend(url) {
+  const mailToken = getSharedMailScheduleToken();
+  let mailError = null;
+
+  if (mailToken) {
+    try {
+      return await requestMailScheduleDashboard(url.toString());
+    } catch (error) {
+      mailError = error;
+      console.warn('Render mail dashboard failed; trying Apps Script fallback.', error);
+    }
+  }
+
   try {
     return await iframeBridge(url.toString());
   } catch (bridgeError) {
     try {
       return await jsonp(url.toString());
     } catch (jsonpError) {
+      const prefix = mailError
+        ? 'Backend Render/IMAP: ' + (mailError.message || 'brak szczegółów') + ' | '
+        : '';
       throw new Error(
-        'Most iframe i JSONP nie zwróciły danych. ' +
+        prefix +
+        'Most iframe i JSONP Apps Script nie zwróciły danych. ' +
         'Iframe: ' + (bridgeError && bridgeError.message ? bridgeError.message : 'brak szczegółów') +
-        ' | JSONP: ' + (jsonpError && jsonpError.message ? jsonpError.message : 'brak szczegółów') +
-        '. Aplikacja wymusza teraz właściwe konto Google (authuser=0). Otwórz link testu backendu; odpowiedź ok:true albo ok:false potwierdza działanie wdrożenia. Sprawdź też, czy przeglądarka nie blokuje script.google.com ani googleusercontent.com.'
+        ' | JSONP: ' + (jsonpError && jsonpError.message ? jsonpError.message : 'brak szczegółów')
       );
     }
   }
@@ -910,9 +962,9 @@ async function ensureInternatWeekLoaded() {
     state.internatWeeks = retained;
     persist();
   }
-  if (!state.backendUrl) {
+  if (!state.backendUrl && !getSharedMailScheduleToken()) {
     render();
-    toast('Widok całego internatu wymaga połączenia z backendem albo danych testowych zawierających pełny plan.');
+    toast('Widok całego internatu wymaga połączenia z backendem albo tokenu synchronizacji poczty Asystenta MOW.');
     return;
   }
   if (internatWeekRequests.has(weekStart)) return internatWeekRequests.get(weekStart);
