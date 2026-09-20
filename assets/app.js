@@ -387,7 +387,7 @@ async function checkForAppUpdate(manual = false) {
 }
 
 function backendUrlWithParams(action, extraParams = {}) {
-  const url = new URL(state.backendUrl);
+  const url = new URL(state.backendUrl || DEFAULT_STATE.backendUrl);
   // Apps Script can otherwise bind the request to another signed-in Google
   // account (for example /u/1/) and return a "file not found" page instead of
   // the web-app response. The deployment belongs to the primary account.
@@ -462,16 +462,21 @@ async function refreshFromBackend(options = {}) {
   if (button) button.disabled = true;
   try {
     const action = state.adminToken && !options.automatic ? 'sync' : 'dashboard';
-    toast(action === 'sync'
-      ? (options.automatic ? 'Automatyczna synchronizacja przy uruchomieniu…' : 'Synchronizuję Gmail i Kalendarz…')
-      : 'Pobieram widok z backendu bez zapisu do kalendarza…');
+    const usingMailSource = Boolean(getSharedMailScheduleToken());
+    toast(usingMailSource
+      ? 'Odświeżam najnowszy grafik z poczty przez Render…'
+      : (action === 'sync'
+        ? (options.automatic ? 'Automatyczna synchronizacja przy uruchomieniu…' : 'Synchronizuję Gmail i Kalendarz…')
+        : 'Pobieram widok z backendu bez zapisu do kalendarza…'));
     const payload = await requestBackend(backendUrlWithParams(action));
     state.backendError = '';
     const dashboard = extractDashboard(payload);
     applyPayload(dashboard);
     if (state.dayFilter === 'internat') await ensureInternatWeekLoaded();
     const suffix = (state.educator || 'Dymek') === (state.calendarEducator || 'Dymek') ? '' : ' Kalendarz Google pozostał tylko dla ' + (state.calendarEducator || 'Dymek') + '.';
-    toast((action === 'sync' ? 'Synchronizacja zakończona.' : 'Widok pobrany.') + suffix);
+    toast((getSharedMailScheduleToken()
+      ? 'Aktualny grafik pobrany z poczty przez Render.'
+      : (action === 'sync' ? 'Synchronizacja zakończona.' : 'Widok pobrany.')) + suffix);
   } catch (error) {
     state.backendError = error.message;
     persist();
@@ -550,19 +555,21 @@ function buildPublicTestUrl(url) {
 
 async function testBackendConnection() {
   if (!saveSettings({ silent: true })) return;
-  if (!state.backendUrl) {
-    toast('Najpierw wpisz adres backendu /exec.');
+  if (!state.backendUrl && !getSharedMailScheduleToken()) {
+    toast('Brak skonfigurowanego źródła aktualizacji.');
     return;
   }
   const button = $('testBackendBtn');
   button.disabled = true;
   try {
-    toast('Testuję backend Apps Script…');
+    toast(getSharedMailScheduleToken() ? 'Testuję backend Render/IMAP…' : 'Testuję backend Apps Script…');
     const payload = await requestBackend(backendUrlWithParams('ping'));
     state.backendError = '';
     const dashboard = extractDashboard(payload);
     applyPayload(dashboard);
-    toast('Backend działa. Odpowiedź Apps Script jest poprawna.');
+    toast(getSharedMailScheduleToken()
+      ? 'Backend Render/IMAP działa i zwraca aktualny grafik.'
+      : 'Backend Apps Script działa.');
   } catch (error) {
     state.backendError = error.message;
     persist();
