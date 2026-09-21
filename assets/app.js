@@ -1,9 +1,10 @@
-const APP_VERSION = '12.5.4';
+const APP_VERSION = '12.5.5';
 const STORAGE_KEY = 'harmonogram-mow-state-v12';
 const LEGACY_STORAGE_KEYS = ['harmonogram-mow-state-v11', 'harmonogram-mow-state-v10', 'harmonogram-mow-state-v9', 'harmonogram-mow-state-v8'];
 const MAX_INTERNAT_CACHE_WEEKS = 60;
 const INTERNAT_CACHE_SCHEMA = 'canonical-latest-v2';
 const MAIL_SCHEDULE_BACKEND_URL = 'https://asmow.onrender.com/api/schedule-dashboard';
+const MAIL_SCHEDULE_STATUS_URL = 'https://asmow.onrender.com/api/schedule-status';
 const SCHEDULE_POLICY_REVISION = 'latest-document-per-week-v2';
 const DEFAULT_STATE = {
   backendUrl: 'https://script.google.com/macros/s/AKfycbwBTAjRfp5cK5oRvDZ0oRAJ_zrxzsqE_4v7pgvrpMZYcXQovb9Fd7JWlQggYEVkotBwBA/exec',
@@ -35,6 +36,7 @@ let deferredInstallPrompt = null;
 let serviceWorkerRegistration = null;
 let serviceWorkerReloading = false;
 let automaticRefreshPromise = null;
+let scheduleRefreshWatchPromise = null;
 let hiddenAt = 0;
 const internatWeekRequests = new Map();
 let state = loadState();
@@ -193,7 +195,7 @@ async function requestMailScheduleDashboard(baseUrl) {
   const weekStart = String(sourceUrl.searchParams.get('weekStart') || '');
   const forceRefresh = ['refresh', 'sync', 'scan', 'forceRescan'].includes(action);
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), forceRefresh ? 20_000 : 12_000);
+  const timer = setTimeout(() => ctrl.abort(), forceRefresh ? 30_000 : 20_000);
 
   let response;
   let payload;
@@ -492,14 +494,22 @@ async function refreshFromBackend(options = {}) {
   const button = $('refreshBtn');
   if (button) button.disabled = true;
   try {
-    toast('Odświeżam kanoniczny grafik z poczty przez Render…');
+    toast(options.automatic
+      ? 'Pobieram aktualny kanoniczny grafik…'
+      : 'Pobieram aktualny grafik i uruchamiam synchronizację źródła…');
     const payload = await requestBackend(backendUrlWithParams(options.automatic ? 'dashboard' : 'refresh'));
     state.backendError = '';
     applyPayload(extractDashboard(payload));
     if (state.dayFilter === 'internat') await ensureInternatWeekLoaded();
-    toast(payload?.stale
-      ? 'Źródło pocztowe chwilowo niedostępne — pokazuję ostatni poprawny kanoniczny grafik z cache backendu.'
-      : 'Kanoniczny grafik został zweryfikowany. Starsze wersje nie zostały użyte.');
+
+    if (payload?.refreshing) {
+      toast('Aktualny grafik jest dostępny. Pełna synchronizacja poczty trwa w tle — aplikacja sama pobierze wynik po zakończeniu.');
+      watchScheduleRefresh(state.scheduleRevision || '').catch(() => {});
+    } else {
+      toast(payload?.stale
+        ? 'Źródło pocztowe chwilowo niedostępne — pokazuję ostatni poprawny kanoniczny grafik z cache backendu.'
+        : 'Kanoniczny grafik został zweryfikowany. Starsze wersje nie zostały użyte.');
+    }
   } catch (error) {
     state.backendError = error.message;
     persist();
@@ -552,34 +562,21 @@ function buildPublicTestUrl(url) {
 
 async function testBackendConnection() {
   if (!saveSettings({ silent: true })) return;
-  if (!getSharedMailScheduleToken()) {
-    toast('Brak tokenu kanonicznego backendu Render/IMAP.');
-    return;
-  }
   const button = $('testBackendBtn');
   button.disabled = true;
   try {
-    toast('Testuję dostępność backendu Render…');
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 5000);
-    let response;
-    try {
-      response = await fetch('https://asmow.onrender.com/health', {
-        signal: ctrl.signal,
-        cache: 'no-store'
-      });
-    } finally {
-      clearTimeout(timer);
-    }
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`);
+    toast('Sprawdzam backend i stan kanonicznego cache…');
+    const payload = await fetchScheduleStatus(15_000);
     state.backendError = '';
     persist();
     render();
-    toast(`Backend działa. Wersja: ${payload.version || 'nieznana'}.`);
+    const cacheText = payload.cacheReady
+      ? (payload.refreshing ? 'cache gotowy, synchronizacja trwa w tle' : 'cache gotowy')
+      : 'backend działa, cache jest przygotowywany';
+    toast(`Backend działa. Wersja: ${payload.version || 'nieznana'} • ${cacheText}.`);
   } catch (error) {
     const message = error?.name === 'AbortError'
-      ? 'backend nie odpowiedział na /health w ciągu 5 sekund'
+      ? 'backend nie odpowiedział na test stanu w ciągu 15 sekund'
       : (error?.message || 'nieznany błąd');
     state.backendError = message;
     persist();
@@ -587,6 +584,58 @@ async function testBackendConnection() {
     toast('Błąd testu backendu: ' + message);
   } finally {
     button.disabled = false;
+  }
+}
+
+async function fetchScheduleStatus(timeoutMs = 15_000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const response = await fetch(MAIL_SCHEDULE_STATUS_URL, {
+      signal: ctrl.signal,
+      cache: 'no-store'
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`);
+    return payload;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function watchScheduleRefresh(previousRevision = '') {
+  if (scheduleRefreshWatchPromise) return scheduleRefreshWatchPromise;
+  scheduleRefreshWatchPromise = (async () => {
+    const deadline = Date.now() + 4 * 60_000;
+    let lastStatus = null;
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 3_000));
+      try {
+        lastStatus = await fetchScheduleStatus(12_000);
+      } catch {
+        continue;
+      }
+      if (lastStatus.refreshing) continue;
+
+      const payload = await requestBackend(backendUrlWithParams('dashboard'));
+      const dashboard = extractDashboard(payload);
+      state.backendError = '';
+      applyPayload(dashboard);
+      if (state.dayFilter === 'internat') await ensureInternatWeekLoaded();
+      const changed = Boolean(dashboard.scheduleRevision && dashboard.scheduleRevision !== previousRevision);
+      toast(changed
+        ? 'Synchronizacja zakończona. Pobrano nowszą kanoniczną wersję grafiku.'
+        : 'Synchronizacja zakończona. Kanoniczny grafik jest aktualny.');
+      return true;
+    }
+    toast('Synchronizacja nadal trwa w tle. Aktualny poprawny grafik pozostaje dostępny; aplikacja sprawdzi źródło ponownie przy następnym otwarciu.');
+    return false;
+  })();
+
+  try {
+    return await scheduleRefreshWatchPromise;
+  } finally {
+    scheduleRefreshWatchPromise = null;
   }
 }
 
