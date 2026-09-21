@@ -309,26 +309,65 @@ await test('synchronizacja kalendarza jest idempotentna i nie usuwa przed wstawi
   assert.equal(runtime.context.secondSync.unchanged, 1);
 });
 
-await test('interfejs 12.5.0 ma jedno menu, kanoniczną synchronizację i wersjonowane zasoby', () => {
+await test('interfejs 12.5.1 ma jedno menu, kanoniczną synchronizację i wersjonowane zasoby', () => {
   const html = read('index.html');
   const app = read('assets/app.js');
   const worker = read('service-worker.js');
   const sample = JSON.parse(read('data/sample-weeks.json'));
   const packageData = JSON.parse(read('package.json'));
-  assert.equal(packageData.version, '12.5.0');
+  assert.equal(packageData.version, '12.5.1');
   assert.equal((html.match(/id="actionsMenu"/g) || []).length, 1);
   assert.match(html, /<option value="internat">Cały internat<\/option>/);
-  assert.match(html, /assets\/app\.js\?v=12\.4\.1/);
-  assert.match(html, /assets\/styles\.css\?v=12\.4\.1/);
+  assert.match(html, /assets\/app\.js\?v=12\.5\.1/);
+  assert.match(html, /assets\/styles\.css\?v=12\.5\.1/);
   assert.match(app, /autoRefreshFromBackend\('start'\)/);
   assert.match(app, /SCHEDULE_POLICY_REVISION = 'latest-document-per-week-v1'/);
   assert.doesNotMatch(app.slice(app.indexOf('async function requestBackend'), app.indexOf('\nfunction ', app.indexOf('async function requestBackend') + 20)), /iframeBridge|jsonp/);
   assert.doesNotMatch(app, /loadSampleData\(false\)/);
-  assert.match(worker, /APP_VERSION = '12\.4\.1'/);
+  assert.match(worker, /APP_VERSION = '12\.5\.1'/);
   assert.match(app, /searchParams\.set\('authuser', '0'\)/);
   assert.match(app, /<details class="internat-day/);
   assert.match(app, /<details class="internat-group/);
   assert.ok(sample.internatWeeks?.['2026-06-08'], 'Brak demonstracyjnego planu całego internatu');
+});
+
+await test('kanoniczna odpowiedź musi być atomowo spójna dla weeks, internatWeeks i authoritativeWeeks', () => {
+  const app = read('assets/app.js');
+  const start = app.indexOf('function normalizeBackendUrl');
+  const context = vm.createContext({
+    URL, Intl, Date, console, setTimeout, clearTimeout, Blob,
+    MAX_INTERNAT_CACHE_WEEKS: 8,
+    INTERNAT_CACHE_SCHEMA: 'canonical-latest-v1',
+    SCHEDULE_POLICY_REVISION: 'latest-document-per-week-v1',
+    state: { educator: 'Dymek' }
+  });
+  new vm.Script(`${app.slice(start)}\n    globalThis.canonical = { extractDashboard };`).runInContext(context);
+  const valid = {
+    ok: true,
+    schedulePolicyRevision: 'latest-document-per-week-v1',
+    scheduleRevision: 'rev-1',
+    weeks: [{ weekStart: '2026-09-14', sourceVersion: 'src-1', days: [] }],
+    history: [],
+    internatWeeks: {
+      '2026-09-14': { weekStart: '2026-09-14', sourceVersion: 'src-1', days: [] }
+    },
+    authoritativeWeeks: {
+      '2026-09-14': { sourceVersion: 'src-1', id: 'doc-1' }
+    }
+  };
+  assert.equal(context.canonical.extractDashboard(valid).scheduleRevision, 'rev-1');
+
+  const mixed = structuredClone(valid);
+  mixed.internatWeeks['2026-09-14'].sourceVersion = 'stare-src';
+  assert.throws(() => context.canonical.extractDashboard(mixed), /niespójna wersja źródła/);
+
+  const duplicate = structuredClone(valid);
+  duplicate.weeks.push({ ...duplicate.weeks[0] });
+  assert.throws(() => context.canonical.extractDashboard(duplicate), /zduplikowany tydzień/);
+
+  const incomplete = structuredClone(valid);
+  delete incomplete.authoritativeWeeks['2026-09-14'];
+  assert.throws(() => context.canonical.extractDashboard(incomplete), /brak spójnych danych/);
 });
 
 await test('grafik korzysta wyłącznie z kanonicznego Render i nie przywraca alternatywnych źródeł', () => {
