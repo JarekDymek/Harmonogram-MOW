@@ -1,8 +1,8 @@
 {
   "name": "harmonogram-mow",
-  "version": "12.5.6",
+  "version": "12.5.7",
   "private": true,
-  "description": "PWA do grafiku pracy MOW: Gmail, DOCX, historia godzin i Google Calendar przez kanoniczny Render/IMAP; Apps Script tylko dla funkcji Kalendarza i zgodności.",
+  "description": "PWA do grafiku pracy MOW: backend Google Apps Script, VIEW_TOKEN / ADMIN_TOKEN, Gmail, historia godzin i Google Calendar.",
   "scripts": {
     "test": "node run-tests.mjs",
     "check": "node --check assets/app.js && node --check service-worker.js && node run-tests.mjs"
