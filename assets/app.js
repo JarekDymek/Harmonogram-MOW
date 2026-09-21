@@ -1,4 +1,4 @@
-const APP_VERSION = '12.5.0';
+const APP_VERSION = '12.5.1';
 const STORAGE_KEY = 'harmonogram-mow-state-v12';
 const LEGACY_STORAGE_KEYS = ['harmonogram-mow-state-v11', 'harmonogram-mow-state-v10', 'harmonogram-mow-state-v9', 'harmonogram-mow-state-v8'];
 const MAX_INTERNAT_CACHE_WEEKS = 8;
@@ -573,17 +573,61 @@ function extractDashboard(payload) {
   if (policy !== SCHEDULE_POLICY_REVISION) {
     throw new Error(`niezgodna polityka grafiku: ${policy || 'brak'}`);
   }
+
   const weeks = candidate.weeks || payload.weeks;
   const history = candidate.history || payload.history || [];
   const alerts = candidate.alerts || payload.alerts || [];
+  const internatWeeks = candidate.internatWeeks || payload.internatWeeks;
+  const authoritativeWeeks = candidate.authoritativeWeeks || payload.authoritativeWeeks;
+  const scheduleRevision = candidate.scheduleRevision || payload.scheduleRevision || '';
+
   if (!Array.isArray(weeks)) throw new Error('odpowiedź backendu nie zawiera tablicy weeks');
+  if (!scheduleRevision) throw new Error('kanoniczna odpowiedź nie zawiera scheduleRevision');
+  if (!internatWeeks || typeof internatWeeks !== 'object' || Array.isArray(internatWeeks)) {
+    throw new Error('kanoniczna odpowiedź nie zawiera pełnego internatWeeks');
+  }
+  if (!authoritativeWeeks || typeof authoritativeWeeks !== 'object' || Array.isArray(authoritativeWeeks)) {
+    throw new Error('kanoniczna odpowiedź nie zawiera authoritativeWeeks');
+  }
+
+  const seenWeeks = new Set();
+  weeks.forEach(week => {
+    const weekStart = String(week?.weekStart || week?.dateFrom || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) {
+      throw new Error('kanoniczna odpowiedź zawiera tydzień bez poprawnego weekStart');
+    }
+    if (seenWeeks.has(weekStart)) {
+      throw new Error(`kanoniczna odpowiedź zawiera zduplikowany tydzień ${weekStart}`);
+    }
+    seenWeeks.add(weekStart);
+
+    const internatWeek = internatWeeks[weekStart];
+    const authoritative = authoritativeWeeks[weekStart];
+    if (!internatWeek || !authoritative) {
+      throw new Error(`brak spójnych danych całego internatu dla tygodnia ${weekStart}`);
+    }
+    const weekVersion = String(week.sourceVersion || '');
+    const internatVersion = String(internatWeek.sourceVersion || '');
+    const authoritativeVersion = String(authoritative.sourceVersion || '');
+    if (!weekVersion || weekVersion !== internatVersion || weekVersion !== authoritativeVersion) {
+      throw new Error(`niespójna wersja źródła dla tygodnia ${weekStart}`);
+    }
+  });
+
+  const extraInternatWeeks = Object.keys(internatWeeks).filter(weekStart => !seenWeeks.has(weekStart));
+  if (extraInternatWeeks.length) {
+    throw new Error(`internatWeeks zawiera tygodnie spoza kanonicznego zestawu: ${extraInternatWeeks.join(', ')}`);
+  }
+
   return {
     ...candidate,
     weeks,
     history,
     alerts,
+    internatWeeks,
+    authoritativeWeeks,
     schedulePolicyRevision: policy,
-    scheduleRevision: candidate.scheduleRevision || payload.scheduleRevision || '',
+    scheduleRevision,
     generatedAt: candidate.generatedAt || payload.generatedAt || payload.updatedAt,
     updatedAt: candidate.updatedAt || payload.updatedAt || candidate.generatedAt || payload.generatedAt,
     educator: candidate.educator || payload.educator || state.educator || 'Dymek',
