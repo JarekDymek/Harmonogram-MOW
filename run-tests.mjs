@@ -304,9 +304,9 @@ await test('interfejs 12.5.8 korzysta z Apps Script i istniejących tokenów', (
   const packageData = JSON.parse(read('package.json'));
   assert.equal(packageData.version, '12.5.8');
   assert.equal((html.match(/id="actionsMenu"/g) || []).length, 1);
-  assert.match(html, /assets\/app\.js\?v=12\.5\.7/);
-  assert.match(html, /assets\/styles\.css\?v=12\.5\.7/);
-  assert.match(worker, /APP_VERSION = '12\.5\.7'/);
+  assert.match(html, /assets\/app\.js\?v=12\.5\.8/);
+  assert.match(html, /assets\/styles\.css\?v=12\.5\.8/);
+  assert.match(worker, /APP_VERSION = '12\.5\.8'/);
   assert.match(html, /VIEW_TOKEN/);
   assert.match(html, /ADMIN_TOKEN/);
   assert.doesNotMatch(html, /id="syncToken"/);
