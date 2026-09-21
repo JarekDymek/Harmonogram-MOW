@@ -1,9 +1,10 @@
-const APP_VERSION = '12.4.5';
+const APP_VERSION = '12.5.0';
 const STORAGE_KEY = 'harmonogram-mow-state-v12';
 const LEGACY_STORAGE_KEYS = ['harmonogram-mow-state-v11', 'harmonogram-mow-state-v10', 'harmonogram-mow-state-v9', 'harmonogram-mow-state-v8'];
 const MAX_INTERNAT_CACHE_WEEKS = 8;
-const INTERNAT_CACHE_SCHEMA = 'school-year-parser-v2';
+const INTERNAT_CACHE_SCHEMA = 'canonical-latest-v1';
 const MAIL_SCHEDULE_BACKEND_URL = 'https://asmow.onrender.com/api/schedule-dashboard';
+const SCHEDULE_POLICY_REVISION = 'latest-document-per-week-v1';
 const DEFAULT_STATE = {
   backendUrl: 'https://script.google.com/macros/s/AKfycbwBTAjRfp5cK5oRvDZ0oRAJ_zrxzsqE_4v7pgvrpMZYcXQovb9Fd7JWlQggYEVkotBwBA/exec',
   viewToken: '',
@@ -23,7 +24,9 @@ const DEFAULT_STATE = {
   lastSync: null,
   activeTab: 1,
   weekTabOffset: 0,
-  backendError: ''
+  backendError: '',
+  schedulePolicyRevision: '',
+  scheduleRevision: ''
 };
 
 const $ = (id) => document.getElementById(id);
@@ -89,10 +92,8 @@ if (actionsMenu) actionsMenu.querySelectorAll('button').forEach(button => {
 hydrateSettings();
 render();
 initializePwa();
-if (getSharedMailScheduleToken() || (state.backendUrl && (state.adminToken || state.viewToken))) {
+if (getSharedMailScheduleToken()) {
   queueMicrotask(() => autoRefreshFromBackend('start'));
-} else if (!state.weeks.length) {
-  loadSampleData(false);
 }
 
 window.addEventListener('pageshow', event => {
@@ -130,6 +131,16 @@ function loadState() {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
       }
       LEGACY_STORAGE_KEYS.forEach(legacyKey => localStorage.removeItem(legacyKey));
+      if (merged.schedulePolicyRevision !== SCHEDULE_POLICY_REVISION) {
+        merged.weeks = [];
+        merged.history = [];
+        merged.alerts = [];
+        merged.changes = [];
+        merged.internatWeeks = {};
+        merged.availableEducators = [];
+        merged.scheduleRevision = '';
+        merged.schedulePolicyRevision = '';
+      }
       return merged;
     } catch {}
   }
@@ -197,11 +208,22 @@ async function requestMailScheduleDashboard(baseUrl) {
   if (!response.ok || payload.ok === false) {
     throw new Error(payload.error || `HTTP ${response.status}`);
   }
+  const policy = payload.schedulePolicyRevision || payload?.data?.schedulePolicyRevision || '';
+  if (policy !== SCHEDULE_POLICY_REVISION) {
+    throw new Error(`backend grafiku ma niezgodną politykę źródła (${policy || 'brak'}); oczekiwano ${SCHEDULE_POLICY_REVISION}`);
+  }
 
   if (action === 'internat') {
     const internatWeek = payload?.data?.internatWeeks?.[weekStart] || payload?.internatWeeks?.[weekStart];
     if (!internatWeek) throw new Error('backend Render nie zwrócił planu całego internatu dla wybranego tygodnia');
-    return { ok: true, action: 'internat', data: { internatWeek }, internatWeek };
+    return {
+      ok: true,
+      action: 'internat',
+      schedulePolicyRevision: policy,
+      scheduleRevision: payload.scheduleRevision || payload?.data?.scheduleRevision || '',
+      data: { internatWeek },
+      internatWeek
+    };
   }
   return payload;
 }
@@ -439,7 +461,7 @@ async function loadSampleData(showToast = true) {
 }
 
 async function autoRefreshFromBackend(reason = 'start') {
-  if (!getSharedMailScheduleToken() && (!state.backendUrl || (!state.adminToken && !state.viewToken))) return;
+  if (!getSharedMailScheduleToken()) return;
   if (automaticRefreshPromise) return automaticRefreshPromise;
   automaticRefreshPromise = refreshFromBackend({ automatic: true, reason });
   try {
@@ -450,6 +472,33 @@ async function autoRefreshFromBackend(reason = 'start') {
 }
 
 async function refreshFromBackend(options = {}) {
+  if (!saveSettings({ silent: true })) return;
+  if (!getSharedMailScheduleToken()) {
+    if (!options.automatic) {
+      toast('Brak tokenu kanonicznego backendu Render/IMAP. Zapisz token synchronizacji poczty w Asystencie MOW.');
+      $('settingsPanel').classList.remove('hidden');
+    }
+    return;
+  }
+  const button = $('refreshBtn');
+  if (button) button.disabled = true;
+  try {
+    toast('Odświeżam kanoniczny grafik z poczty przez Render…');
+    const payload = await requestBackend(backendUrlWithParams('dashboard'));
+    state.backendError = '';
+    const dashboard = extractDashboard(payload);
+    applyPayload(dashboard);
+    if (state.dayFilter === 'internat') await ensureInternatWeekLoaded();
+    toast('Kanoniczny grafik został zweryfikowany. Starsze wersje nie zostały użyte.');
+  } catch (error) {
+    state.backendError = error.message;
+    persist();
+    render();
+    toast(`Błąd kanonicznego backendu: ${error.message}. Zachowano ostatnią poprawną wersję.`);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}) {
   if (!saveSettings({ silent: true })) return;
   if (!state.backendUrl && !getSharedMailScheduleToken()) {
     if (!options.automatic) {
@@ -489,60 +538,35 @@ async function refreshFromBackend(options = {}) {
 
 async function loadDashboardOnly() {
   if (!saveSettings({ silent: true })) return;
-  if (!state.backendUrl && !getSharedMailScheduleToken()) {
-    toast('Brak źródła aktualizacji. Otwórz Asystenta MOW i zapisz token synchronizacji poczty.');
+  if (!getSharedMailScheduleToken()) {
+    toast('Brak tokenu kanonicznego backendu Render/IMAP.');
     $('settingsPanel').classList.remove('hidden');
     return;
   }
   const button = $('dashboardBtn');
   button.disabled = true;
   try {
-    toast('Pobieram dane bez synchronizacji kalendarza…');
+    toast('Pobieram kanoniczny grafik bez zapisu do kalendarza…');
     const payload = await requestBackend(backendUrlWithParams('dashboard'));
     state.backendError = '';
     applyPayload(extractDashboard(payload));
     if (state.dayFilter === 'internat') await ensureInternatWeekLoaded();
-    toast('Widok pobrany. Nic nie zapisano do Kalendarza Google.');
+    toast('Pobrano kanoniczny grafik. Kalendarz Google nie został zmieniony.');
   } catch (error) {
     state.backendError = error.message;
     persist();
     render();
-    toast(`Błąd backendu: ${error.message}`);
+    toast(`Błąd kanonicznego backendu: ${error.message}. Zachowano ostatnią poprawną wersję.`);
   } finally {
     button.disabled = false;
   }
 }
 
 async function requestBackend(url) {
-  const mailToken = getSharedMailScheduleToken();
-  let mailError = null;
-
-  if (mailToken) {
-    try {
-      return await requestMailScheduleDashboard(url.toString());
-    } catch (error) {
-      mailError = error;
-      console.warn('Render mail dashboard failed; trying Apps Script fallback.', error);
-    }
+  if (!getSharedMailScheduleToken()) {
+    throw new Error('Brak tokenu kanonicznego backendu Render/IMAP. Apps Script nie jest już używany jako zastępcze źródło grafiku.');
   }
-
-  try {
-    return await iframeBridge(url.toString());
-  } catch (bridgeError) {
-    try {
-      return await jsonp(url.toString());
-    } catch (jsonpError) {
-      const prefix = mailError
-        ? 'Backend Render/IMAP: ' + (mailError.message || 'brak szczegółów') + ' | '
-        : '';
-      throw new Error(
-        prefix +
-        'Most iframe i JSONP Apps Script nie zwróciły danych. ' +
-        'Iframe: ' + (bridgeError && bridgeError.message ? bridgeError.message : 'brak szczegółów') +
-        ' | JSONP: ' + (jsonpError && jsonpError.message ? jsonpError.message : 'brak szczegółów')
-      );
-    }
-  }
+  return requestMailScheduleDashboard(url.toString());
 }
 
 function buildPublicTestUrl(url) {
@@ -555,21 +579,19 @@ function buildPublicTestUrl(url) {
 
 async function testBackendConnection() {
   if (!saveSettings({ silent: true })) return;
-  if (!state.backendUrl && !getSharedMailScheduleToken()) {
-    toast('Brak skonfigurowanego źródła aktualizacji.');
+  if (!getSharedMailScheduleToken()) {
+    toast('Brak tokenu kanonicznego backendu Render/IMAP.');
     return;
   }
   const button = $('testBackendBtn');
   button.disabled = true;
   try {
-    toast(getSharedMailScheduleToken() ? 'Testuję backend Render/IMAP…' : 'Testuję backend Apps Script…');
-    const payload = await requestBackend(backendUrlWithParams('ping'));
+    toast('Testuję kanoniczny backend Render/IMAP…');
+    const payload = await requestBackend(backendUrlWithParams('dashboard'));
     state.backendError = '';
     const dashboard = extractDashboard(payload);
     applyPayload(dashboard);
-    toast(getSharedMailScheduleToken()
-      ? 'Backend Render/IMAP działa i zwraca aktualny grafik.'
-      : 'Backend Apps Script działa.');
+    toast(`Backend działa. Polityka: ${SCHEDULE_POLICY_REVISION}. Rewizja danych: ${state.scheduleRevision || 'brak'}.`);
   } catch (error) {
     state.backendError = error.message;
     persist();
@@ -584,6 +606,10 @@ function extractDashboard(payload) {
   if (!payload || typeof payload !== 'object') throw new Error('pusta odpowiedź backendu');
   if (payload.ok === false) throw new Error(payload.error || 'backend zwrócił ok=false');
   const candidate = payload.data || payload.dashboard || payload.result || payload;
+  const policy = candidate.schedulePolicyRevision || payload.schedulePolicyRevision || '';
+  if (policy !== SCHEDULE_POLICY_REVISION) {
+    throw new Error(`niezgodna polityka grafiku: ${policy || 'brak'}`);
+  }
   const weeks = candidate.weeks || payload.weeks;
   const history = candidate.history || payload.history || [];
   const alerts = candidate.alerts || payload.alerts || [];
@@ -593,6 +619,8 @@ function extractDashboard(payload) {
     weeks,
     history,
     alerts,
+    schedulePolicyRevision: policy,
+    scheduleRevision: candidate.scheduleRevision || payload.scheduleRevision || '',
     generatedAt: candidate.generatedAt || payload.generatedAt || payload.updatedAt,
     updatedAt: candidate.updatedAt || payload.updatedAt || candidate.generatedAt || payload.generatedAt,
     educator: candidate.educator || payload.educator || state.educator || 'Dymek',
@@ -603,6 +631,9 @@ function extractDashboard(payload) {
 
 function applyPayload(payload) {
   const normalized = normalizePayload(payload);
+  if (normalized.schedulePolicyRevision !== SCHEDULE_POLICY_REVISION) {
+    throw new Error('odpowiedź nie pochodzi z kanonicznej polityki grafiku');
+  }
   const incomingAlerts = normalized.alerts || [];
   const newAlerts = incomingAlerts.filter(alert => alert.id && !state.seenAlertIds.includes(alert.id));
   state.weeks = normalized.weeks;
@@ -610,11 +641,13 @@ function applyPayload(payload) {
   state.alerts = incomingAlerts;
   state.changes = normalized.changes || collectChangesFromWeeks(normalized.weeks);
   state.internatWeeks = mergeInternatWeekCache(state.internatWeeks, normalized.internatWeeks, normalized.weeks, normalized.hasInternatWeeks);
-  state.availableEducators = normalized.availableEducators || state.availableEducators || [];
+  state.availableEducators = normalized.availableEducators || [];
   state.lastSync = normalized.updatedAt || new Date().toISOString();
   state.educator = normalized.educator || state.educator || 'Dymek';
   state.calendarEducator = normalized.calendarEducator || state.calendarEducator || 'Dymek';
   state.security = normalized.security || state.security || {};
+  state.schedulePolicyRevision = normalized.schedulePolicyRevision;
+  state.scheduleRevision = normalized.scheduleRevision || '';
   state.activeTab = getPreferredWeekIndex(state.weeks);
   state.weekTabOffset = getWeekTabOffsetForActive(state.activeTab, state.weeks.length);
   if (newAlerts.length) {
@@ -633,10 +666,32 @@ function normalizePayload(payload) {
   const history = sortHistoryRows(cleanSource.history && cleanSource.history.length ? cleanSource.history : weeks.map(weekToHistoryRow));
   const hasInternatWeeks = Object.prototype.hasOwnProperty.call(cleanSource, 'internatWeeks');
   const internatWeeks = Object.fromEntries(Object.entries(cleanSource.internatWeeks || {}).map(([weekStart, week]) => [weekStart, normalizeInternatWeek(week)]));
-  return { weeks, history, alerts: cleanSource.alerts || [], changes: cleanSource.changes || collectChangesFromWeeks(weeks), internatWeeks, hasInternatWeeks, availableEducators: cleanSource.availableEducators || [], updatedAt: cleanSource.updatedAt || cleanSource.generatedAt, educator: cleanSource.educator, calendarEducator: cleanSource.calendarEducator, security: cleanSource.security || {} };
+  return {
+    weeks,
+    history,
+    alerts: cleanSource.alerts || [],
+    changes: cleanSource.changes || collectChangesFromWeeks(weeks),
+    internatWeeks,
+    hasInternatWeeks,
+    availableEducators: cleanSource.availableEducators || [],
+    updatedAt: cleanSource.updatedAt || cleanSource.generatedAt,
+    educator: cleanSource.educator,
+    calendarEducator: cleanSource.calendarEducator,
+    security: cleanSource.security || {},
+    schedulePolicyRevision: cleanSource.schedulePolicyRevision || '',
+    scheduleRevision: cleanSource.scheduleRevision || ''
+  };
 }
 
 function mergeInternatWeekCache(existing = {}, incoming = {}, weeks = [], hasIncoming = false) {
+  const source = hasIncoming
+    ? (incoming && typeof incoming === 'object' && !Array.isArray(incoming) ? incoming : {})
+    : (existing && typeof existing === 'object' && !Array.isArray(existing) ? existing : {});
+  return Object.fromEntries(Object.entries(source)
+    .filter(([, week]) => isInternatWeekCacheUsable(week))
+    .sort(([left], [right]) => String(left).localeCompare(String(right)))
+    .slice(-MAX_INTERNAT_CACHE_WEEKS));
+}, incoming = {}, weeks = [], hasIncoming = false) {
   const merged = {
     ...(existing && typeof existing === 'object' && !Array.isArray(existing) ? existing : {}),
     ...(hasIncoming && incoming && typeof incoming === 'object' && !Array.isArray(incoming) ? incoming : {})
