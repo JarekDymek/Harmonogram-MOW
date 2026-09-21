@@ -1,4 +1,4 @@
-const APP_VERSION = '12.5.5';
+const APP_VERSION = '12.5.6';
 const STORAGE_KEY = 'harmonogram-mow-state-v12';
 const LEGACY_STORAGE_KEYS = ['harmonogram-mow-state-v11', 'harmonogram-mow-state-v10', 'harmonogram-mow-state-v9', 'harmonogram-mow-state-v8'];
 const MAX_INTERNAT_CACHE_WEEKS = 60;
@@ -10,6 +10,7 @@ const DEFAULT_STATE = {
   backendUrl: 'https://script.google.com/macros/s/AKfycbwBTAjRfp5cK5oRvDZ0oRAJ_zrxzsqE_4v7pgvrpMZYcXQovb9Fd7JWlQggYEVkotBwBA/exec',
   viewToken: '',
   adminToken: '',
+  syncToken: '',
   layoutMode: 'auto',
   shareMode: 'full',
   dayFilter: 'all',
@@ -166,6 +167,7 @@ function hydrateSettings() {
   $('backendUrl').value = state.backendUrl || '';
   $('viewToken').value = state.viewToken || '';
   $('adminToken').value = state.adminToken || '';
+  if ($('syncToken')) $('syncToken').value = state.syncToken || '';
   $('layoutMode').value = state.layoutMode || 'auto';
   if ($('shareMode')) $('shareMode').value = state.shareMode || 'full';
   if ($('dayFilter')) $('dayFilter').value = state.dayFilter || 'all';
@@ -177,6 +179,8 @@ function hydrateSettings() {
 }
 
 function getSharedMailScheduleToken() {
+  const localToken = String(state?.syncToken || '').trim();
+  if (localToken) return localToken;
   try {
     const parsed = JSON.parse(localStorage.getItem('mow_current_info_sync_v1') || '{}');
     return String(parsed.token || '').trim();
@@ -298,6 +302,7 @@ function saveSettings(options = {}) {
   }
   state.viewToken = $('viewToken').value.trim();
   state.adminToken = $('adminToken').value.trim();
+  state.syncToken = $('syncToken') ? $('syncToken').value.trim() : String(state.syncToken || '').trim();
   state.layoutMode = $('layoutMode').value || 'auto';
   state.shareMode = $('shareMode') ? ($('shareMode').value || 'full') : 'full';
   state.dayFilter = $('dayFilter') ? ($('dayFilter').value || 'all') : 'all';
@@ -486,7 +491,7 @@ async function refreshFromBackend(options = {}) {
   if (!saveSettings({ silent: true })) return;
   if (!getSharedMailScheduleToken()) {
     if (!options.automatic) {
-      toast('Brak tokenu kanonicznego backendu Render/IMAP. Zapisz token synchronizacji poczty w Asystencie MOW.');
+      toast('Brak tokenu kanonicznego backendu Render/IMAP. Wpisz token synchronizacji grafiku w Ustawieniach połączenia.');
       $('settingsPanel').classList.remove('hidden');
     }
     return;
