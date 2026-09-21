@@ -2,7 +2,7 @@
 
 PWA do pobierania grafików internatu z Gmaila, odczytu plików DOCX, prezentowania dyżurów wychowawców oraz synchronizacji wybranych wpisów z Kalendarzem Google. Frontend jest statyczną aplikacją HTML/CSS/JavaScript. Jedynym źródłem grafiku pracy jest kanoniczny backend Render/IMAP współdzielony z Asystentem MOW. Google Apps Script nie jest źródłem ani fallbackiem grafiku; pozostaje w repo dla funkcji Kalendarza i zgodności historycznej.
 
-Aktualna wersja frontendu: **12.5.0**
+Aktualna wersja frontendu: **12.5.1**
 Ostatni pełny audyt: **26 sierpnia 2026**
 Repozytorium: [JarekDymek/Harmonogram-MOW](https://github.com/JarekDymek/Harmonogram-MOW)
 
@@ -467,3 +467,11 @@ Backend przekazuje `schedulePolicyRevision=latest-document-per-week-v1`, globaln
 - usunięte dopisywanie rekordów poprzedniego tygodnia i grafików innych zespołów;
 - zachowanie ostatniego poprawnego planu przy błędzie backendu;
 - nowy cache PWA `12.5.0` i testy regresji architektury.
+
+
+## Zmiany 12.5.1 — atomowy grafik kanoniczny
+
+- aplikacja przyjmuje tylko kompletną odpowiedź Render, w której `weeks`, `internatWeeks` i `authoritativeWeeks` wskazują tę samą wersję źródła dla każdego tygodnia;
+- zduplikowane tygodnie, brak metadanych lub mieszane `sourceVersion` powodują odrzucenie całej odpowiedzi i zachowanie ostatniego poprawnego stanu;
+- aplikacja nie łączy danych Render z Apps Script ani ze starym lokalnym indeksem grafików;
+- wersja cache 12.5.1 wymusza pobranie poprawionej logiki walidacji.
