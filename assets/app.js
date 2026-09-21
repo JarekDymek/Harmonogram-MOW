@@ -1,10 +1,10 @@
-const APP_VERSION = '12.5.1';
+const APP_VERSION = '12.5.2';
 const STORAGE_KEY = 'harmonogram-mow-state-v12';
 const LEGACY_STORAGE_KEYS = ['harmonogram-mow-state-v11', 'harmonogram-mow-state-v10', 'harmonogram-mow-state-v9', 'harmonogram-mow-state-v8'];
-const MAX_INTERNAT_CACHE_WEEKS = 8;
-const INTERNAT_CACHE_SCHEMA = 'canonical-latest-v1';
+const MAX_INTERNAT_CACHE_WEEKS = 60;
+const INTERNAT_CACHE_SCHEMA = 'canonical-latest-v2';
 const MAIL_SCHEDULE_BACKEND_URL = 'https://asmow.onrender.com/api/schedule-dashboard';
-const SCHEDULE_POLICY_REVISION = 'latest-document-per-week-v1';
+const SCHEDULE_POLICY_REVISION = 'latest-document-per-week-v2';
 const DEFAULT_STATE = {
   backendUrl: 'https://script.google.com/macros/s/AKfycbwBTAjRfp5cK5oRvDZ0oRAJ_zrxzsqE_4v7pgvrpMZYcXQovb9Fd7JWlQggYEVkotBwBA/exec',
   viewToken: '',
@@ -26,7 +26,8 @@ const DEFAULT_STATE = {
   weekTabOffset: 0,
   backendError: '',
   schedulePolicyRevision: '',
-  scheduleRevision: ''
+  scheduleRevision: '',
+  scheduleEducator: ''
 };
 
 const $ = (id) => document.getElementById(id);
@@ -139,6 +140,7 @@ function loadState() {
         merged.availableEducators = [];
         merged.scheduleRevision = '';
         merged.schedulePolicyRevision = '';
+        merged.scheduleEducator = '';
       }
       return merged;
     } catch {}
@@ -643,14 +645,20 @@ function applyPayload(payload) {
   }
   const incomingAlerts = normalized.alerts || [];
   const newAlerts = incomingAlerts.filter(alert => alert.id && !state.seenAlertIds.includes(alert.id));
-  state.weeks = normalized.weeks;
-  state.history = normalized.history;
+  const incomingEducator = normalized.educator || state.educator || 'Dymek';
+  const sameEducator = !state.scheduleEducator
+    || normalizeName(state.scheduleEducator) === normalizeName(incomingEducator);
+  state.weeks = sameEducator
+    ? mergeCanonicalWeeks(state.weeks, normalized.weeks)
+    : normalized.weeks;
+  state.history = sortHistoryRows(state.weeks.map(weekToHistoryRow));
   state.alerts = incomingAlerts;
-  state.changes = normalized.changes || collectChangesFromWeeks(normalized.weeks);
+  state.changes = collectChangesFromWeeks(state.weeks);
   state.internatWeeks = mergeInternatWeekCache(state.internatWeeks, normalized.internatWeeks, normalized.weeks, normalized.hasInternatWeeks);
   state.availableEducators = normalized.availableEducators || [];
   state.lastSync = normalized.updatedAt || new Date().toISOString();
-  state.educator = normalized.educator || state.educator || 'Dymek';
+  state.educator = incomingEducator;
+  state.scheduleEducator = incomingEducator;
   state.calendarEducator = normalized.calendarEducator || state.calendarEducator || 'Dymek';
   state.security = normalized.security || state.security || {};
   state.schedulePolicyRevision = normalized.schedulePolicyRevision;
@@ -690,12 +698,59 @@ function normalizePayload(payload) {
   };
 }
 
+function compareCanonicalWeekSource(incomingWeek, existingWeek) {
+  const incoming = incomingWeek?.authoritativeDocument || {};
+  const existing = existingWeek?.authoritativeDocument || {};
+  const byDate = String(incoming.sourceSentAt || incoming.sourceDate || '')
+    .localeCompare(String(existing.sourceSentAt || existing.sourceDate || ''));
+  if (byDate) return byDate;
+  const byUid = Number(incoming.sourceMailUid || 0) - Number(existing.sourceMailUid || 0);
+  if (byUid) return byUid;
+  return String(incoming.id || incomingWeek?.sourceVersion || '')
+    .localeCompare(String(existing.id || existingWeek?.sourceVersion || ''));
+}
+
+function mergeCanonicalWeeks(existing = [], incoming = []) {
+  const merged = new Map();
+  (existing || []).forEach(week => {
+    const weekStart = String(week?.weekStart || week?.dateFrom || '');
+    if (weekStart) merged.set(weekStart, week);
+  });
+  (incoming || []).forEach(week => {
+    const weekStart = String(week?.weekStart || week?.dateFrom || '');
+    if (!weekStart) return;
+    const current = merged.get(weekStart);
+    if (!current) {
+      merged.set(weekStart, week);
+      return;
+    }
+    // Ten sam dokument źródłowy pozostaje zamrożony lokalnie.
+    if (week.sourceVersion && week.sourceVersion === current.sourceVersion) return;
+    if (!current.sourceVersion || compareCanonicalWeekSource(week, current) > 0) merged.set(weekStart, week);
+  });
+  return [...merged.values()].sort(compareWeekLikeAsc);
+}
+
 function mergeInternatWeekCache(existing = {}, incoming = {}, weeks = [], hasIncoming = false) {
-  const source = hasIncoming
-    ? (incoming && typeof incoming === 'object' && !Array.isArray(incoming) ? incoming : {})
-    : (existing && typeof existing === 'object' && !Array.isArray(existing) ? existing : {});
-  return Object.fromEntries(Object.entries(source)
-    .filter(([, week]) => isInternatWeekCacheUsable(week))
+  const merged = new Map(
+    Object.entries(existing && typeof existing === 'object' && !Array.isArray(existing) ? existing : {})
+      .filter(([, week]) => isInternatWeekCacheUsable(week))
+  );
+
+  if (hasIncoming && incoming && typeof incoming === 'object' && !Array.isArray(incoming)) {
+    Object.entries(incoming).forEach(([weekStart, week]) => {
+      if (!isInternatWeekCacheUsable(week)) return;
+      const current = merged.get(weekStart);
+      if (!current) {
+        merged.set(weekStart, week);
+        return;
+      }
+      if (week.sourceVersion && week.sourceVersion === current.sourceVersion) return;
+      if (!current.sourceVersion || compareCanonicalWeekSource(week, current) > 0) merged.set(weekStart, week);
+    });
+  }
+
+  return Object.fromEntries([...merged.entries()]
     .sort(([left], [right]) => String(left).localeCompare(String(right)))
     .slice(-MAX_INTERNAT_CACHE_WEEKS));
 }
