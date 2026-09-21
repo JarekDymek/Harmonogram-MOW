@@ -45,7 +45,7 @@ await test('funkcje dat, URL i normalizacji frontendu', () => {
   const app = read('assets/app.js');
   const start = app.indexOf('function normalizeBackendUrl');
   assert.ok(start > 0, 'Nie znaleziono funkcji frontendu do testów');
-  const context = vm.createContext({ URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 8, INTERNAT_CACHE_SCHEMA: 'canonical-latest-v1' });
+  const context = vm.createContext({ URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 60, INTERNAT_CACHE_SCHEMA: 'canonical-latest-v2' });
   new vm.Script(`${app.slice(start)}\n    globalThis.frontend = { normalizeBackendUrl, parseLocalDate, addDaysIso, durationHours, normalizeWeek, escapeHtml, formatDateTime, toLocalIsoDate };`
   ).runInContext(context);
   const api = context.frontend;
@@ -70,7 +70,7 @@ await test('żądania Apps Script wymuszają właściwe konto Google', () => {
   const app = read('assets/app.js');
   const start = app.indexOf('function normalizeBackendUrl');
   const context = vm.createContext({
-    URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 8,
+    URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 60,
     state: {
       backendUrl: 'https://script.google.com/macros/s/ABC/exec',
       educator: 'Dymek',
@@ -91,7 +91,7 @@ await test('żądania Apps Script wymuszają właściwe konto Google', () => {
 await test('most iframe akceptuje wyłącznie właściwą odpowiedź z ramki Google', () => {
   const app = read('assets/app.js');
   const start = app.indexOf('function normalizeBackendUrl');
-  const context = vm.createContext({ URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 8 });
+  const context = vm.createContext({ URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 60 });
   new vm.Script(`${app.slice(start)}\n    globalThis.bridgeProtocol = { isAllowedBridgeOrigin, isExpectedBridgeMessage };`
   ).runInContext(context);
   const api = context.bridgeProtocol;
@@ -110,7 +110,7 @@ await test('most iframe akceptuje wyłącznie właściwą odpowiedź z ramki Goo
 await test('pełny plan grupuje dyżury i zachowuje aktualny cache', () => {
   const app = read('assets/app.js');
   const start = app.indexOf('function normalizeBackendUrl');
-  const context = vm.createContext({ URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 8, INTERNAT_CACHE_SCHEMA: 'canonical-latest-v1' });
+  const context = vm.createContext({ URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 60, INTERNAT_CACHE_SCHEMA: 'canonical-latest-v2' });
   new vm.Script(`${app.slice(start)}\n    globalThis.internatUi = { getInternatShiftGroup, groupInternatShifts, mergeInternatWeekCache, migratePersistedInternatWeeks, validateInternatWeekDays };`
   ).runInContext(context);
   const api = context.internatUi;
@@ -133,7 +133,7 @@ await test('pełny plan grupuje dyżury i zachowuje aktualny cache', () => {
   ] }];
   assert.equal(context.internatUi.validateInternatWeekDays(mixedDays).length, 2, 'Widok ma ostrzegać o mieszaniu trybów i ponad 24 h');
 
-  const cached = { '2026-08-10': { weekStart: '2026-08-10', sourceVersion: 'abc', days: [], cacheSchema: 'canonical-latest-v1', validationWarnings: [] } };
+  const cached = { '2026-08-10': { weekStart: '2026-08-10', sourceVersion: 'abc', days: [], cacheSchema: 'canonical-latest-v2', validationWarnings: [] } };
   const retained = api.mergeInternatWeekCache(cached, {}, [{ weekStart: '2026-08-10', sourceVersion: 'abc' }], false);
   assert.ok(retained['2026-08-10'], 'Dashboard nie może usuwać aktualnego planu internatu z cache');
   const migrated = api.migratePersistedInternatWeeks({ '2026-08-31': { weekStart: '2026-08-31', days: [] } });
@@ -145,13 +145,13 @@ await test('pełny plan grupuje dyżury i zachowuje aktualny cache', () => {
       weekStart: '2026-08-17',
       sourceVersion: 'canonical-new',
       days: [],
-      cacheSchema: 'canonical-latest-v1',
+      cacheSchema: 'canonical-latest-v2',
       validationWarnings: []
     }
   };
   const replaced = api.mergeInternatWeekCache(cached, canonicalIncoming, [{ weekStart: '2026-08-17', sourceVersion: 'canonical-new' }], true);
-  assert.equal(replaced['2026-08-10'], undefined, 'Pełna kanoniczna odpowiedź musi usunąć tygodnie nieobecne w backendzie');
-  assert.ok(replaced['2026-08-17'], 'Pełna kanoniczna odpowiedź musi atomowo zastąpić cache internatu');
+  assert.ok(replaced['2026-08-10'], 'Brak tygodnia w odpowiedzi backendu nie może usuwać zapisanej historii');
+  assert.ok(replaced['2026-08-17'], 'Nowy kanoniczny tydzień musi zostać dopisany do cache internatu');
 });
 
 class MockBlob {
@@ -309,19 +309,19 @@ await test('synchronizacja kalendarza jest idempotentna i nie usuwa przed wstawi
   assert.equal(runtime.context.secondSync.unchanged, 1);
 });
 
-await test('interfejs 12.5.1 ma jedno menu, kanoniczną synchronizację i wersjonowane zasoby', () => {
+await test('interfejs 12.5.2 ma jedno menu, kanoniczną synchronizację i wersjonowane zasoby', () => {
   const html = read('index.html');
   const app = read('assets/app.js');
   const worker = read('service-worker.js');
   const sample = JSON.parse(read('data/sample-weeks.json'));
   const packageData = JSON.parse(read('package.json'));
-  assert.equal(packageData.version, '12.5.1');
+  assert.equal(packageData.version, '12.5.2');
   assert.equal((html.match(/id="actionsMenu"/g) || []).length, 1);
   assert.match(html, /<option value="internat">Cały internat<\/option>/);
   assert.match(html, /assets\/app\.js\?v=12\.5\.1/);
   assert.match(html, /assets\/styles\.css\?v=12\.5\.1/);
   assert.match(app, /autoRefreshFromBackend\('start'\)/);
-  assert.match(app, /SCHEDULE_POLICY_REVISION = 'latest-document-per-week-v1'/);
+  assert.match(app, /SCHEDULE_POLICY_REVISION = 'latest-document-per-week-v2'/);
   assert.doesNotMatch(app.slice(app.indexOf('async function requestBackend'), app.indexOf('\nfunction ', app.indexOf('async function requestBackend') + 20)), /iframeBridge|jsonp/);
   assert.doesNotMatch(app, /loadSampleData\(false\)/);
   assert.match(worker, /APP_VERSION = '12\.5\.1'/);
@@ -331,20 +331,65 @@ await test('interfejs 12.5.1 ma jedno menu, kanoniczną synchronizację i wersjo
   assert.ok(sample.internatWeeks?.['2026-06-08'], 'Brak demonstracyjnego planu całego internatu');
 });
 
+await test('ten sam dokument zamraża tydzień, a wyłącznie nowszy dokument może go zastąpić', () => {
+  const app = read('assets/app.js');
+  const start = app.indexOf('function normalizeBackendUrl');
+  const context = vm.createContext({
+    URL, Intl, Date, console, setTimeout, clearTimeout, Blob,
+    MAX_INTERNAT_CACHE_WEEKS: 60,
+    INTERNAT_CACHE_SCHEMA: 'canonical-latest-v2'
+  });
+  new vm.Script(`${app.slice(start)}\n    globalThis.freezeApi = { mergeCanonicalWeeks, mergeInternatWeekCache };`).runInContext(context);
+
+  const oldWeek = {
+    weekStart: '2026-09-14',
+    dateFrom: '2026-09-14',
+    sourceVersion: 'doc-a',
+    authoritativeDocument: { id: 'a', sourceSentAt: '2026-09-16T13:15', sourceMailUid: '120' },
+    days: [{ marker: 'pierwszy-poprawny-odczyt' }]
+  };
+  const sameDocumentDifferentParse = {
+    ...oldWeek,
+    days: [{ marker: 'inny-wynik-parsera' }]
+  };
+  const frozen = context.freezeApi.mergeCanonicalWeeks([oldWeek], [sameDocumentDifferentParse]);
+  assert.equal(frozen[0].days[0].marker, 'pierwszy-poprawny-odczyt');
+
+  const olderDocument = {
+    ...oldWeek,
+    sourceVersion: 'doc-old',
+    authoritativeDocument: { id: 'old', sourceSentAt: '2026-09-15T09:48', sourceMailUid: '110' },
+    days: [{ marker: 'starszy' }]
+  };
+  assert.equal(context.freezeApi.mergeCanonicalWeeks([oldWeek], [olderDocument])[0].days[0].marker, 'pierwszy-poprawny-odczyt');
+
+  const newerDocument = {
+    ...oldWeek,
+    sourceVersion: 'doc-new',
+    authoritativeDocument: { id: 'new', sourceSentAt: '2026-09-17T08:00', sourceMailUid: '130' },
+    days: [{ marker: 'nowa-korekta' }]
+  };
+  assert.equal(context.freezeApi.mergeCanonicalWeeks([oldWeek], [newerDocument])[0].days[0].marker, 'nowa-korekta');
+
+  const missingFromBackend = context.freezeApi.mergeCanonicalWeeks([oldWeek], []);
+  assert.equal(missingFromBackend.length, 1);
+  assert.equal(missingFromBackend[0].sourceVersion, 'doc-a');
+});
+
 await test('kanoniczna odpowiedź musi być atomowo spójna dla weeks, internatWeeks i authoritativeWeeks', () => {
   const app = read('assets/app.js');
   const start = app.indexOf('function normalizeBackendUrl');
   const context = vm.createContext({
     URL, Intl, Date, console, setTimeout, clearTimeout, Blob,
-    MAX_INTERNAT_CACHE_WEEKS: 8,
-    INTERNAT_CACHE_SCHEMA: 'canonical-latest-v1',
-    SCHEDULE_POLICY_REVISION: 'latest-document-per-week-v1',
+    MAX_INTERNAT_CACHE_WEEKS: 60,
+    INTERNAT_CACHE_SCHEMA: 'canonical-latest-v2',
+    SCHEDULE_POLICY_REVISION: 'latest-document-per-week-v2',
     state: { educator: 'Dymek' }
   });
   new vm.Script(`${app.slice(start)}\n    globalThis.canonical = { extractDashboard };`).runInContext(context);
   const valid = {
     ok: true,
-    schedulePolicyRevision: 'latest-document-per-week-v1',
+    schedulePolicyRevision: 'latest-document-per-week-v2',
     scheduleRevision: 'rev-1',
     weeks: [{ weekStart: '2026-09-14', sourceVersion: 'src-1', days: [] }],
     history: [],
@@ -377,7 +422,7 @@ await test('grafik korzysta wyłącznie z kanonicznego Render i nie przywraca al
   const requestBody = app.slice(requestStart, requestEnd);
   assert.match(requestBody, /requestMailScheduleDashboard/);
   assert.doesNotMatch(requestBody, /iframeBridge|jsonp|Apps Script fallback/);
-  assert.match(app, /SCHEDULE_POLICY_REVISION = 'latest-document-per-week-v1'/);
+  assert.match(app, /SCHEDULE_POLICY_REVISION = 'latest-document-per-week-v2'/);
   assert.match(app, /schedulePolicyRevision !== SCHEDULE_POLICY_REVISION/);
   assert.doesNotMatch(app, /loadSampleData\(false\)/);
   assert.match(app, /Zachowano ostatnią poprawną wersję/);
