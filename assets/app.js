@@ -559,17 +559,32 @@ async function testBackendConnection() {
   const button = $('testBackendBtn');
   button.disabled = true;
   try {
-    toast('Testuję kanoniczny backend Render/IMAP…');
-    const payload = await requestBackend(backendUrlWithParams('dashboard'));
+    toast('Testuję dostępność backendu Render…');
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 5000);
+    let response;
+    try {
+      response = await fetch('https://asmow.onrender.com/health', {
+        signal: ctrl.signal,
+        cache: 'no-store'
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`);
     state.backendError = '';
-    const dashboard = extractDashboard(payload);
-    applyPayload(dashboard);
-    toast(`Backend działa. Polityka: ${SCHEDULE_POLICY_REVISION}. Rewizja danych: ${state.scheduleRevision || 'brak'}.`);
-  } catch (error) {
-    state.backendError = error.message;
     persist();
     render();
-    toast('Błąd testu backendu: ' + error.message);
+    toast(`Backend działa. Wersja: ${payload.version || 'nieznana'}.`);
+  } catch (error) {
+    const message = error?.name === 'AbortError'
+      ? 'backend nie odpowiedział na /health w ciągu 5 sekund'
+      : (error?.message || 'nieznany błąd');
+    state.backendError = message;
+    persist();
+    render();
+    toast('Błąd testu backendu: ' + message);
   } finally {
     button.disabled = false;
   }
