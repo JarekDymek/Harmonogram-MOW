@@ -59,8 +59,6 @@ $('settingsBtn').addEventListener('click', () => {
   $('settingsPanel').classList.toggle('hidden');
   $('actionsMenu')?.removeAttribute('open');
 });
-const sampleBtn = $('sampleBtn');
-if (sampleBtn) sampleBtn.addEventListener('click', loadSampleData);
 $('dashboardBtn').addEventListener('click', loadDashboardOnly);
 const testBackendBtn = $('testBackendBtn');
 if (testBackendBtn) testBackendBtn.addEventListener('click', testBackendConnection);
