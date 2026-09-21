@@ -59,7 +59,8 @@ $('settingsBtn').addEventListener('click', () => {
   $('settingsPanel').classList.toggle('hidden');
   $('actionsMenu')?.removeAttribute('open');
 });
-$('sampleBtn').addEventListener('click', loadSampleData);
+const sampleBtn = $('sampleBtn');
+if (sampleBtn) sampleBtn.addEventListener('click', loadSampleData);
 $('dashboardBtn').addEventListener('click', loadDashboardOnly);
 const testBackendBtn = $('testBackendBtn');
 if (testBackendBtn) testBackendBtn.addEventListener('click', testBackendConnection);
@@ -810,12 +811,37 @@ function normalizeShift(shift) {
 
 function notifyAlerts(alerts) {
   const first = alerts[0];
-  toast(first.message || 'Wykryto korektę grafiku.');
-  if ('Notification' in window && Notification.permission === 'granted') {
-    alerts.slice(0, 3).forEach(alert => new Notification('Harmonogram MOW — korekta grafiku', { body: alert.message || `${alert.range}: ${alert.filename}`, tag: alert.id }));
+  toast(first?.message || 'Wykryto korektę grafiku.');
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+
+  const notices = (alerts || []).slice(0, 3).map(alert => ({
+    title: 'Harmonogram MOW — korekta grafiku',
+    options: {
+      body: alert.message || `${alert.range}: ${alert.filename}`,
+      tag: alert.id
+    }
+  }));
+
+  try {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready
+        .then(registration => Promise.all(
+          notices.map(item => registration.showNotification(item.title, item.options))
+        ))
+        .catch(error => console.warn('Powiadomienie PWA nie mogło zostać wyświetlone.', error));
+      return;
+    }
+    notices.forEach(item => {
+      try {
+        new Notification(item.title, item.options);
+      } catch (error) {
+        console.warn('Powiadomienie przeglądarki nie mogło zostać wyświetlone.', error);
+      }
+    });
+  } catch (error) {
+    console.warn('Błąd warstwy powiadomień nie wpływa na zapis grafiku.', error);
   }
 }
-
 function render() {
   $('lastSync').textContent = state.lastSync ? `Ostatnia aktualizacja: ${formatDateTime(state.lastSync)} • widok: ${state.educator || 'Dymek'} • kalendarz: tylko ${state.calendarEducator || 'Dymek'}` : 'Brak połączenia z backendem. Możesz załadować dane testowe.';
   renderSecurityNotice();
@@ -968,9 +994,9 @@ async function ensureInternatWeekLoaded() {
     state.internatWeeks = retained;
     persist();
   }
-  if (!state.backendUrl && !getSharedMailScheduleToken()) {
+  if (!getSharedMailScheduleToken()) {
     render();
-    toast('Widok całego internatu wymaga połączenia z backendem albo tokenu synchronizacji poczty Asystenta MOW.');
+    toast('Widok całego internatu wymaga tokenu kanonicznego backendu Render/IMAP z Asystenta MOW.');
     return;
   }
   if (internatWeekRequests.has(weekStart)) return internatWeekRequests.get(weekStart);
