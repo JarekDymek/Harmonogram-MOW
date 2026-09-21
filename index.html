@@ -8,7 +8,7 @@
   <meta name="description" content="Harmonogram pracy MOW: Gmail, korekty, historia godzin, weekendy i Google Calendar.">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="assets/styles.css?v=12.5.7">
+  <link rel="stylesheet" href="assets/styles.css?v=12.5.8">
   <title>Harmonogram MOW</title>
 </head>
 <body>
@@ -16,7 +16,7 @@
     <div class="title-block">
       <p class="eyebrow">MOW • Grafik pracy</p>
       <h1>Harmonogram MOW</h1>
-      <p id="lastSync" class="subline">Ładowanie danych…</p>
+      <p id="lastSync" class="subline">Uruchamianie aplikacji…</p>
     </div>
   </header>
 
@@ -26,7 +26,7 @@
         <summary>Ustawienia <span aria-hidden="true">⌄</span></summary>
         <div class="action-menu-panel card">
           <div class="app-version" aria-live="polite">
-            <strong>Harmonogram MOW <span id="appVersion">12.5.7</span></strong>
+            <strong>Harmonogram MOW <span id="appVersion">12.5.8</span></strong>
             <span id="updateStatus">Sprawdzanie wersji…</span>
           </div>
           <div class="menu-actions">
@@ -91,7 +91,7 @@
           </label>
           <div class="row-actions compact-actions">
             <button id="saveSettingsBtn" class="primary" type="button">Zapisz</button>
-            <button id="clearCacheBtn" class="danger" type="button">Wyczyść dane</button>
+            <button id="clearCacheBtn" class="danger" type="button">Wyczyść cache grafiku</button>
           </div>
         </div>
       </div>
@@ -146,6 +146,6 @@
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="assets/app.js?v=12.5.7" type="module"></script>
+  <script src="assets/app.js?v=12.5.8" type="module"></script>
 </body>
 </html>
