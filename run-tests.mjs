@@ -309,22 +309,22 @@ await test('synchronizacja kalendarza jest idempotentna i nie usuwa przed wstawi
   assert.equal(runtime.context.secondSync.unchanged, 1);
 });
 
-await test('interfejs 12.5.3 ma jedno menu, kanoniczną synchronizację i wersjonowane zasoby', () => {
+await test('interfejs 12.5.4 ma jedno menu, kanoniczną synchronizację i wersjonowane zasoby', () => {
   const html = read('index.html');
   const app = read('assets/app.js');
   const worker = read('service-worker.js');
   const sample = JSON.parse(read('data/sample-weeks.json'));
   const packageData = JSON.parse(read('package.json'));
-  assert.equal(packageData.version, '12.5.3');
+  assert.equal(packageData.version, '12.5.4');
   assert.equal((html.match(/id="actionsMenu"/g) || []).length, 1);
   assert.match(html, /<option value="internat">Cały internat<\/option>/);
-  assert.match(html, /assets\/app\.js\?v=12\.5\.3/);
-  assert.match(html, /assets\/styles\.css\?v=12\.5\.3/);
+  assert.match(html, /assets\/app\.js\?v=12\.5\.4/);
+  assert.match(html, /assets\/styles\.css\?v=12\.5\.4/);
   assert.match(app, /autoRefreshFromBackend\('start'\)/);
   assert.match(app, /SCHEDULE_POLICY_REVISION = 'latest-document-per-week-v2'/);
   assert.doesNotMatch(app.slice(app.indexOf('async function requestBackend'), app.indexOf('\nfunction ', app.indexOf('async function requestBackend') + 20)), /iframeBridge|jsonp/);
   assert.doesNotMatch(app, /loadSampleData\(false\)/);
-  assert.match(worker, /APP_VERSION = '12\.5\.3'/);
+  assert.match(worker, /APP_VERSION = '12\.5\.4'/);
   assert.match(app, /searchParams\.set\('authuser', '0'\)/);
   assert.match(app, /<details class="internat-day/);
   assert.match(app, /<details class="internat-group/);
