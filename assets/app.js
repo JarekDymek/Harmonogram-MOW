@@ -1,5 +1,6 @@
-const APP_VERSION = '12.5.7';
+const APP_VERSION = '12.5.8';
 const STORAGE_KEY = 'harmonogram-mow-state-v12';
+const SETTINGS_KEY = 'harmonogram-mow-settings-v1';
 const LEGACY_STORAGE_KEYS = ['harmonogram-mow-state-v11', 'harmonogram-mow-state-v10', 'harmonogram-mow-state-v9', 'harmonogram-mow-state-v8'];
 const MAX_INTERNAT_CACHE_WEEKS = 8;
 const INTERNAT_CACHE_SCHEMA = 'school-year-parser-v2';
@@ -89,8 +90,6 @@ render();
 initializePwa();
 if (state.backendUrl && (state.adminToken || state.viewToken)) {
   queueMicrotask(() => autoRefreshFromBackend('start'));
-} else if (!state.weeks.length) {
-  loadSampleData(false);
 }
 
 window.addEventListener('pageshow', event => {
@@ -105,7 +104,50 @@ document.addEventListener('visibilitychange', () => {
   hiddenAt = 0;
 });
 
+function loadConnectionSettings() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return {
+      backendUrl: String(parsed.backendUrl || ''),
+      viewToken: String(parsed.viewToken || ''),
+      adminToken: String(parsed.adminToken || ''),
+      layoutMode: String(parsed.layoutMode || 'auto'),
+      shareMode: String(parsed.shareMode || 'full'),
+      dayFilter: String(parsed.dayFilter || 'all'),
+      educator: String(parsed.educator || 'Dymek'),
+      calendarEducator: String(parsed.calendarEducator || 'Dymek')
+    };
+  } catch {
+    return {};
+  }
+}
+
+function connectionSettingsSnapshot() {
+  return {
+    backendUrl: state.backendUrl || '',
+    viewToken: state.viewToken || '',
+    adminToken: state.adminToken || '',
+    layoutMode: state.layoutMode || 'auto',
+    shareMode: state.shareMode || 'full',
+    dayFilter: state.dayFilter || 'all',
+    educator: state.educator || 'Dymek',
+    calendarEducator: state.calendarEducator || 'Dymek'
+  };
+}
+
+function persistConnectionSettings() {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(connectionSettingsSnapshot()));
+    return true;
+  } catch (error) {
+    console.error('Nie udało się zapisać ustawień połączenia.', error);
+    return false;
+  }
+}
+
 function loadState() {
+  const savedSettings = loadConnectionSettings();
   const keys = [STORAGE_KEY, ...LEGACY_STORAGE_KEYS];
   for (const key of keys) {
     try {
@@ -116,6 +158,7 @@ function loadState() {
       const merged = {
         ...freshDefaultState(),
         ...parsed,
+        ...savedSettings,
         weeks: Array.isArray(parsed.weeks) ? parsed.weeks.sort(compareWeekLikeAsc) : [],
         history: Array.isArray(parsed.history) ? sortHistoryRows(parsed.history) : [],
         alerts: Array.isArray(parsed.alerts) ? parsed.alerts : [],
@@ -125,13 +168,13 @@ function loadState() {
         seenAlertIds: Array.isArray(parsed.seenAlertIds) ? parsed.seenAlertIds : []
       };
       if (key !== STORAGE_KEY) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(merged)); } catch {}
       }
       LEGACY_STORAGE_KEYS.forEach(legacyKey => localStorage.removeItem(legacyKey));
       return merged;
     } catch {}
   }
-  return freshDefaultState();
+  return { ...freshDefaultState(), ...savedSettings };
 }
 function freshDefaultState() {
   return {
@@ -150,8 +193,22 @@ function persist() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     return true;
   } catch (error) {
-    console.error('Nie udało się zapisać stanu aplikacji.', error);
-    return false;
+    console.warn('Pełny cache jest za duży; zapisuję lżejszy cache.', error);
+    try {
+      const compact = {
+        ...state,
+        weeks: (state.weeks || []).slice(-12),
+        history: (state.history || []).slice(0, 20),
+        alerts: (state.alerts || []).slice(0, 10),
+        changes: (state.changes || []).slice(0, 30),
+        internatWeeks: Object.fromEntries(Object.entries(state.internatWeeks || {}).slice(-4))
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(compact));
+      return true;
+    } catch (compactError) {
+      console.error('Nie udało się zapisać nawet lekkiego cache aplikacji.', compactError);
+      return false;
+    }
   }
 }
 function hydrateSettings() {
@@ -230,12 +287,13 @@ function saveSettings(options = {}) {
   state.dayFilter = $('dayFilter') ? ($('dayFilter').value || 'all') : 'all';
   state.educator = $('educator').value.trim() || 'Dymek';
   applyLayoutMode();
-  if (!persist()) {
-    toast('Nie udało się zapisać ustawień. Wyczyść dane aplikacji i spróbuj ponownie.');
+  if (!persistConnectionSettings()) {
+    toast('Nie udało się zapisać ustawień połączenia w pamięci urządzenia.');
     return false;
   }
+  const cacheSaved = persist();
   const mode = state.adminToken ? 'tryb administratora' : (state.viewToken ? 'tryb podglądu' : 'bez tokenu');
-  if (!options.silent) toast('Ustawienia zapisane. Widok: ' + state.educator + '. ' + mode + '. Kalendarz: tylko ' + (state.calendarEducator || 'Dymek') + '.');
+  if (!options.silent) toast('Ustawienia połączenia zapisane. ' + mode + (cacheSaved ? '.' : '. Cache grafiku zostanie odtworzony z backendu.'));
   render();
   return true;
 }
@@ -376,10 +434,10 @@ async function clearCache() {
   } catch (error) {
     console.warn('Nie udało się wyczyścić Cache Storage.', error);
   }
-  state = freshDefaultState();
+  state = { ...freshDefaultState(), ...loadConnectionSettings() };
   hydrateSettings();
   render();
-  toast('Wyczyszczono lokalne dane i pamięć offline aplikacji.');
+  toast('Wyczyszczono cache grafiku. Adres backendu i tokeny pozostały zapisane.');
 }
 
 async function enableNotifications() {
@@ -758,7 +816,7 @@ function notifyAlerts(alerts) {
 }
 
 function render() {
-  $('lastSync').textContent = state.lastSync ? `Ostatnia aktualizacja: ${formatDateTime(state.lastSync)} • widok: ${state.educator || 'Dymek'} • kalendarz: tylko ${state.calendarEducator || 'Dymek'}` : 'Brak połączenia z backendem. Możesz załadować dane testowe.';
+  $('lastSync').textContent = state.lastSync ? `Ostatnia aktualizacja: ${formatDateTime(state.lastSync)} • widok: ${state.educator || 'Dymek'} • kalendarz: tylko ${state.calendarEducator || 'Dymek'}` : (state.backendUrl && (state.adminToken || state.viewToken) ? 'Ustawienia zapisane. Oczekiwanie na pierwszy poprawny odczyt backendu.' : 'Brak zapisanych danych połączenia. Otwórz Ustawienia połączenia.');
   renderSecurityNotice();
   renderBackendDiagnostics();
   renderAlerts();
@@ -947,7 +1005,7 @@ async function ensureInternatWeekLoaded() {
 
 function renderWeek() {
   if (!state.weeks.length) {
-    $('weekView').innerHTML = '<section class="card"><p class="empty">Brak danych. Wpisz backend albo załaduj dane testowe.</p></section>';
+    $('weekView').innerHTML = '<section class="card"><p class="empty">Brak pobranego grafiku. Zapisz ustawienia połączenia i użyj „Pobierz / synchronizuj teraz”.</p></section>';
     return;
   }
   const week = getActiveWeek();
