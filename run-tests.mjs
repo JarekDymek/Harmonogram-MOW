@@ -309,13 +309,13 @@ await test('synchronizacja kalendarza jest idempotentna i nie usuwa przed wstawi
   assert.equal(runtime.context.secondSync.unchanged, 1);
 });
 
-await test('interfejs 12.5.5 ma jedno menu, kanoniczną synchronizację i wersjonowane zasoby', () => {
+await test('interfejs 12.5.6 ma jedno menu, kanoniczną synchronizację i wersjonowane zasoby', () => {
   const html = read('index.html');
   const app = read('assets/app.js');
   const worker = read('service-worker.js');
   const sample = JSON.parse(read('data/sample-weeks.json'));
   const packageData = JSON.parse(read('package.json'));
-  assert.equal(packageData.version, '12.5.5');
+  assert.equal(packageData.version, '12.5.6');
   assert.equal((html.match(/id="actionsMenu"/g) || []).length, 1);
   assert.match(html, /<option value="internat">Cały internat<\/option>/);
   assert.match(html, /assets\/app\.js\?v=12\.5\.5/);
@@ -415,7 +415,7 @@ await test('kanoniczna odpowiedź musi być atomowo spójna dla weeks, internatW
   assert.throws(() => context.canonical.extractDashboard(incomplete), /brak spójnych danych/);
 });
 
-await test('odświeżanie 12.5.5 nie blokuje UI i test backendu nie wymaga tokenu', () => {
+await test('odświeżanie 12.5.6 nie blokuje UI i test backendu nie wymaga tokenu', () => {
   const app = read('assets/app.js');
   const testStart = app.indexOf('async function testBackendConnection');
   const testEnd = app.indexOf('\nfunction ', testStart + 20);
