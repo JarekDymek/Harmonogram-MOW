@@ -1,4 +1,4 @@
-const APP_VERSION = '12.5.2';
+const APP_VERSION = '12.5.3';
 const STORAGE_KEY = 'harmonogram-mow-state-v12';
 const LEGACY_STORAGE_KEYS = ['harmonogram-mow-state-v11', 'harmonogram-mow-state-v10', 'harmonogram-mow-state-v9', 'harmonogram-mow-state-v8'];
 const MAX_INTERNAT_CACHE_WEEKS = 60;
@@ -132,15 +132,7 @@ function loadState() {
       }
       LEGACY_STORAGE_KEYS.forEach(legacyKey => localStorage.removeItem(legacyKey));
       if (merged.schedulePolicyRevision !== SCHEDULE_POLICY_REVISION) {
-        merged.weeks = [];
-        merged.history = [];
-        merged.alerts = [];
-        merged.changes = [];
-        merged.internatWeeks = {};
-        merged.availableEducators = [];
-        merged.scheduleRevision = '';
-        merged.schedulePolicyRevision = '';
-        merged.scheduleEducator = '';
+        merged.legacySchedulePolicyRevision = merged.schedulePolicyRevision || 'legacy';
       }
       return merged;
     } catch {}
@@ -199,13 +191,27 @@ async function requestMailScheduleDashboard(baseUrl) {
   const action = String(sourceUrl.searchParams.get('action') || 'dashboard');
   const educator = String(sourceUrl.searchParams.get('educator') || state.educator || 'Dymek');
   const weekStart = String(sourceUrl.searchParams.get('weekStart') || '');
+  const forceRefresh = ['refresh', 'sync', 'scan', 'forceRescan'].includes(action);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), forceRefresh ? 20_000 : 12_000);
 
-  const response = await fetch(MAIL_SCHEDULE_BACKEND_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token, educator })
-  });
-  const payload = await response.json().catch(() => ({}));
+  let response;
+  let payload;
+  try {
+    response = await fetch(MAIL_SCHEDULE_BACKEND_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: ctrl.signal,
+      body: JSON.stringify({ token, educator, forceRefresh })
+    });
+    payload = await response.json().catch(() => ({}));
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error('backend grafiku nie odpowiedział w wymaganym czasie');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+
   if (!response.ok || payload.ok === false) {
     throw new Error(payload.error || `HTTP ${response.status}`);
   }
@@ -487,11 +493,13 @@ async function refreshFromBackend(options = {}) {
   if (button) button.disabled = true;
   try {
     toast('Odświeżam kanoniczny grafik z poczty przez Render…');
-    const payload = await requestBackend(backendUrlWithParams('dashboard'));
+    const payload = await requestBackend(backendUrlWithParams(options.automatic ? 'dashboard' : 'refresh'));
     state.backendError = '';
     applyPayload(extractDashboard(payload));
     if (state.dayFilter === 'internat') await ensureInternatWeekLoaded();
-    toast('Kanoniczny grafik został zweryfikowany. Starsze wersje nie zostały użyte.');
+    toast(payload?.stale
+      ? 'Źródło pocztowe chwilowo niedostępne — pokazuję ostatni poprawny kanoniczny grafik z cache backendu.'
+      : 'Kanoniczny grafik został zweryfikowany. Starsze wersje nie zostały użyte.');
   } catch (error) {
     state.backendError = error.message;
     persist();
@@ -646,15 +654,18 @@ function applyPayload(payload) {
   const incomingAlerts = normalized.alerts || [];
   const newAlerts = incomingAlerts.filter(alert => alert.id && !state.seenAlertIds.includes(alert.id));
   const incomingEducator = normalized.educator || state.educator || 'Dymek';
+  const samePolicy = state.schedulePolicyRevision === SCHEDULE_POLICY_REVISION;
   const sameEducator = !state.scheduleEducator
     || normalizeName(state.scheduleEducator) === normalizeName(incomingEducator);
-  state.weeks = sameEducator
+  state.weeks = samePolicy && sameEducator
     ? mergeCanonicalWeeks(state.weeks, normalized.weeks)
     : normalized.weeks;
   state.history = sortHistoryRows(state.weeks.map(weekToHistoryRow));
   state.alerts = incomingAlerts;
   state.changes = collectChangesFromWeeks(state.weeks);
-  state.internatWeeks = mergeInternatWeekCache(state.internatWeeks, normalized.internatWeeks, normalized.weeks, normalized.hasInternatWeeks);
+  state.internatWeeks = samePolicy
+    ? mergeInternatWeekCache(state.internatWeeks, normalized.internatWeeks, normalized.weeks, normalized.hasInternatWeeks)
+    : normalized.internatWeeks;
   state.availableEducators = normalized.availableEducators || [];
   state.lastSync = normalized.updatedAt || new Date().toISOString();
   state.educator = incomingEducator;
