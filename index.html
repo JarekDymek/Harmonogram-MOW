@@ -8,7 +8,7 @@
   <meta name="description" content="Harmonogram pracy MOW: Gmail, korekty, historia godzin, weekendy i Google Calendar.">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="assets/styles.css?v=12.5.5">
+  <link rel="stylesheet" href="assets/styles.css?v=12.5.6">
   <title>Harmonogram MOW</title>
 </head>
 <body>
@@ -26,7 +26,7 @@
         <summary>Ustawienia <span aria-hidden="true">⌄</span></summary>
         <div class="action-menu-panel card">
           <div class="app-version" aria-live="polite">
-            <strong>Harmonogram MOW <span id="appVersion">12.5.5</span></strong>
+            <strong>Harmonogram MOW <span id="appVersion">12.5.6</span></strong>
             <span id="updateStatus">Sprawdzanie wersji…</span>
           </div>
           <div class="menu-actions">
@@ -60,6 +60,11 @@
 
         <div>
           <h2>Bezpieczeństwo</h2>
+          <label>
+            Token synchronizacji grafiku Render/IMAP
+            <input id="syncToken" type="password" autocomplete="off" placeholder="Token synchronizacji poczty">
+          </label>
+          <p class="hint">Ten token jest zapisywany wyłącznie lokalnie na tym urządzeniu. Harmonogram MOW i Asystent MOW działają w różnych domenach, więc nie mogą współdzielić localStorage.</p>
           <label>
             VIEW_TOKEN — dla osób, które mają tylko oglądać
             <input id="viewToken" type="password" autocomplete="off" placeholder="view_...">
@@ -146,6 +151,6 @@
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="assets/app.js?v=12.5.5" type="module"></script>
+  <script src="assets/app.js?v=12.5.6" type="module"></script>
 </body>
 </html>
