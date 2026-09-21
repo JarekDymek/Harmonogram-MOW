@@ -297,12 +297,12 @@ await test('synchronizacja kalendarza jest idempotentna i nie usuwa przed wstawi
   assert.equal(runtime.context.secondSync.unchanged, 1);
 });
 
-await test('interfejs 12.5.7 korzysta z Apps Script i istniejących tokenów', () => {
+await test('interfejs 12.5.8 korzysta z Apps Script i istniejących tokenów', () => {
   const html = read('index.html');
   const app = read('assets/app.js');
   const worker = read('service-worker.js');
   const packageData = JSON.parse(read('package.json'));
-  assert.equal(packageData.version, '12.5.7');
+  assert.equal(packageData.version, '12.5.8');
   assert.equal((html.match(/id="actionsMenu"/g) || []).length, 1);
   assert.match(html, /assets\/app\.js\?v=12\.5\.7/);
   assert.match(html, /assets\/styles\.css\?v=12\.5\.7/);
@@ -313,6 +313,10 @@ await test('interfejs 12.5.7 korzysta z Apps Script i istniejących tokenów', (
   assert.doesNotMatch(app, /getSharedMailScheduleToken|MAIL_SCHEDULE_BACKEND_URL|Token synchronizacji grafiku Render\/IMAP/);
   assert.match(app, /if \(!state\.backendUrl \|\| \(!state\.adminToken && !state\.viewToken\)\) return/);
   assert.match(app, /const action = state\.adminToken && !options\.automatic \? 'sync' : 'dashboard'/);
+  assert.match(app, /const SETTINGS_KEY = 'harmonogram-mow-settings-v1'/);
+  assert.match(app, /function persistConnectionSettings\(\)/);
+  assert.match(app, /localStorage\.setItem\(SETTINGS_KEY/);
+  assert.doesNotMatch(app, /else if \(!state\.weeks\.length\) \{\s*loadSampleData\(false\)/);
 });
 
 await test('Pobierz i test backendu używają Apps Script przez VIEW_TOKEN lub ADMIN_TOKEN', () => {
