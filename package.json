@@ -1,6 +1,6 @@
 {
   "name": "harmonogram-mow",
-  "version": "12.5.1",
+  "version": "12.5.2",
   "private": true,
   "description": "PWA do grafiku pracy MOW: Gmail, DOCX, historia godzin i Google Calendar przez kanoniczny Render/IMAP; Apps Script tylko dla funkcji Kalendarza i zgodności.",
   "scripts": {
