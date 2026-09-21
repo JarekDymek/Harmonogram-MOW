@@ -110,7 +110,7 @@ await test('most iframe akceptuje wyłącznie właściwą odpowiedź z ramki Goo
 await test('pełny plan grupuje dyżury i zachowuje aktualny cache', () => {
   const app = read('assets/app.js');
   const start = app.indexOf('function normalizeBackendUrl');
-  const context = vm.createContext({ URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 60, INTERNAT_CACHE_SCHEMA: 'canonical-latest-v2' });
+  const context = vm.createContext({ URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 8, INTERNAT_CACHE_SCHEMA: 'school-year-parser-v2' });
   new vm.Script(`${app.slice(start)}\n    globalThis.internatUi = { getInternatShiftGroup, groupInternatShifts, mergeInternatWeekCache, migratePersistedInternatWeeks, validateInternatWeekDays };`
   ).runInContext(context);
   const api = context.internatUi;
@@ -133,25 +133,13 @@ await test('pełny plan grupuje dyżury i zachowuje aktualny cache', () => {
   ] }];
   assert.equal(context.internatUi.validateInternatWeekDays(mixedDays).length, 2, 'Widok ma ostrzegać o mieszaniu trybów i ponad 24 h');
 
-  const cached = { '2026-08-10': { weekStart: '2026-08-10', sourceVersion: 'abc', days: [], cacheSchema: 'canonical-latest-v2', validationWarnings: [] } };
+  const cached = { '2026-08-10': { weekStart: '2026-08-10', sourceVersion: 'abc', days: [], cacheSchema: 'school-year-parser-v2', validationWarnings: [] } };
   const retained = api.mergeInternatWeekCache(cached, {}, [{ weekStart: '2026-08-10', sourceVersion: 'abc' }], false);
   assert.ok(retained['2026-08-10'], 'Dashboard nie może usuwać aktualnego planu internatu z cache');
   const migrated = api.migratePersistedInternatWeeks({ '2026-08-31': { weekStart: '2026-08-31', days: [] } });
   assert.deepEqual(Object.keys(migrated), [], 'Cache sprzed poprawki parsera musi zostać automatycznie odrzucony');
   const invalidated = api.mergeInternatWeekCache(cached, {}, [{ weekStart: '2026-08-10', sourceVersion: 'nowa-wersja' }], false);
-  assert.ok(invalidated['2026-08-10'], 'Bez kompletnej odpowiedzi backendu ostatni poprawny cache może pozostać lokalnie');
-  const canonicalIncoming = {
-    '2026-08-17': {
-      weekStart: '2026-08-17',
-      sourceVersion: 'canonical-new',
-      days: [],
-      cacheSchema: 'canonical-latest-v2',
-      validationWarnings: []
-    }
-  };
-  const replaced = api.mergeInternatWeekCache(cached, canonicalIncoming, [{ weekStart: '2026-08-17', sourceVersion: 'canonical-new' }], true);
-  assert.ok(replaced['2026-08-10'], 'Brak tygodnia w odpowiedzi backendu nie może usuwać zapisanej historii');
-  assert.ok(replaced['2026-08-17'], 'Nowy kanoniczny tydzień musi zostać dopisany do cache internatu');
+  assert.equal(invalidated['2026-08-10'], undefined, 'Nowa wersja źródła musi unieważnić stary cache');
 });
 
 class MockBlob {
