@@ -19,7 +19,7 @@ await test('pliki JSON i składnia JavaScript', () => {
   JSON.parse(read('package.json'));
   const manifest = JSON.parse(read('manifest.webmanifest'));
   JSON.parse(read('data/sample-weeks.json'));
-  assert.equal(manifest.id, './');
+  assert.equal(manifest.id, '/Harmonogram-MOW/');
   assert.equal(manifest.lang, 'pl');
   assert.ok(manifest.icons.some(icon => icon.purpose === 'any'));
   assert.ok(manifest.icons.some(icon => icon.purpose === 'maskable'));
