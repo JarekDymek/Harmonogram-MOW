@@ -1,6 +1,6 @@
 {
   "name": "harmonogram-mow",
-  "version": "12.5.7",
+  "version": "12.5.8",
   "private": true,
   "description": "PWA do grafiku pracy MOW: backend Google Apps Script, VIEW_TOKEN / ADMIN_TOKEN, Gmail, historia godzin i Google Calendar.",
   "scripts": {
