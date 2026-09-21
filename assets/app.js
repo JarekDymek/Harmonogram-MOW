@@ -279,9 +279,13 @@ function saveSettings(options = {}) {
   try {
     state.backendUrl = normalizeBackendUrl($('backendUrl').value.trim());
   } catch (error) {
-    $('settingsPanel').classList.remove('hidden');
-    toast(error.message);
-    return false;
+    if (!getSharedMailScheduleToken()) {
+      $('settingsPanel').classList.remove('hidden');
+      toast(error.message);
+      return false;
+    }
+    console.warn('Ignoruję błędny adres starego Apps Script; grafik korzysta wyłącznie z Render/IMAP.', error);
+    state.backendUrl = '';
   }
   state.viewToken = $('viewToken').value.trim();
   state.adminToken = $('adminToken').value.trim();
@@ -294,12 +298,10 @@ function saveSettings(options = {}) {
     toast('Nie udało się zapisać ustawień. Wyczyść dane aplikacji i spróbuj ponownie.');
     return false;
   }
-  const mode = state.adminToken ? 'tryb administratora' : (state.viewToken ? 'tryb podglądu' : 'bez tokenu');
-  if (!options.silent) toast('Ustawienia zapisane. Widok: ' + state.educator + '. ' + mode + '. Kalendarz: tylko ' + (state.calendarEducator || 'Dymek') + '.');
+  if (!options.silent) toast('Ustawienia zapisane. Grafik: kanoniczny Render/IMAP. Widok: ' + state.educator + '.');
   render();
   return true;
 }
-
 function applyLayoutMode() {
   const mode = state.layoutMode || 'auto';
   document.documentElement.dataset.layout = mode;
@@ -486,8 +488,7 @@ async function refreshFromBackend(options = {}) {
     toast('Odświeżam kanoniczny grafik z poczty przez Render…');
     const payload = await requestBackend(backendUrlWithParams('dashboard'));
     state.backendError = '';
-    const dashboard = extractDashboard(payload);
-    applyPayload(dashboard);
+    applyPayload(extractDashboard(payload));
     if (state.dayFilter === 'internat') await ensureInternatWeekLoaded();
     toast('Kanoniczny grafik został zweryfikowany. Starsze wersje nie zostały użyte.');
   } catch (error) {
@@ -498,44 +499,7 @@ async function refreshFromBackend(options = {}) {
   } finally {
     if (button) button.disabled = false;
   }
-}) {
-  if (!saveSettings({ silent: true })) return;
-  if (!state.backendUrl && !getSharedMailScheduleToken()) {
-    if (!options.automatic) {
-      toast('Brak źródła aktualizacji. Otwórz Asystenta MOW i zapisz token synchronizacji poczty.');
-      $('settingsPanel').classList.remove('hidden');
-    }
-    return;
-  }
-  const button = $('refreshBtn');
-  if (button) button.disabled = true;
-  try {
-    const action = state.adminToken && !options.automatic ? 'sync' : 'dashboard';
-    const usingMailSource = Boolean(getSharedMailScheduleToken());
-    toast(usingMailSource
-      ? 'Odświeżam najnowszy grafik z poczty przez Render…'
-      : (action === 'sync'
-        ? (options.automatic ? 'Automatyczna synchronizacja przy uruchomieniu…' : 'Synchronizuję Gmail i Kalendarz…')
-        : 'Pobieram widok z backendu bez zapisu do kalendarza…'));
-    const payload = await requestBackend(backendUrlWithParams(action));
-    state.backendError = '';
-    const dashboard = extractDashboard(payload);
-    applyPayload(dashboard);
-    if (state.dayFilter === 'internat') await ensureInternatWeekLoaded();
-    const suffix = (state.educator || 'Dymek') === (state.calendarEducator || 'Dymek') ? '' : ' Kalendarz Google pozostał tylko dla ' + (state.calendarEducator || 'Dymek') + '.';
-    toast((getSharedMailScheduleToken()
-      ? 'Aktualny grafik pobrany z poczty przez Render.'
-      : (action === 'sync' ? 'Synchronizacja zakończona.' : 'Widok pobrany.')) + suffix);
-  } catch (error) {
-    state.backendError = error.message;
-    persist();
-    render();
-    toast(`Błąd backendu: ${error.message}`);
-  } finally {
-    if (button) button.disabled = false;
-  }
 }
-
 async function loadDashboardOnly() {
   if (!saveSettings({ silent: true })) return;
   if (!getSharedMailScheduleToken()) {
@@ -691,27 +655,7 @@ function mergeInternatWeekCache(existing = {}, incoming = {}, weeks = [], hasInc
     .filter(([, week]) => isInternatWeekCacheUsable(week))
     .sort(([left], [right]) => String(left).localeCompare(String(right)))
     .slice(-MAX_INTERNAT_CACHE_WEEKS));
-}, incoming = {}, weeks = [], hasIncoming = false) {
-  const merged = {
-    ...(existing && typeof existing === 'object' && !Array.isArray(existing) ? existing : {}),
-    ...(hasIncoming && incoming && typeof incoming === 'object' && !Array.isArray(incoming) ? incoming : {})
-  };
-
-  (weeks || []).forEach(week => {
-    const weekStart = getWeekCacheKey(week);
-    const cached = weekStart ? merged[weekStart] : null;
-    if (!cached) return;
-    const expectedVersion = String(week.sourceVersion || '');
-    const cachedVersion = String(cached.sourceVersion || '');
-    if (expectedVersion && expectedVersion !== cachedVersion) delete merged[weekStart];
-  });
-
-  return Object.fromEntries(Object.entries(merged)
-    .filter(([, week]) => isInternatWeekCacheUsable(week))
-    .sort(([left], [right]) => String(left).localeCompare(String(right)))
-    .slice(-MAX_INTERNAT_CACHE_WEEKS));
 }
-
 function migratePersistedInternatWeeks(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   return Object.fromEntries(Object.entries(value)
