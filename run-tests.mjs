@@ -1,3 +1,4 @@
+process.env.TZ = 'Europe/Warsaw';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -20,6 +21,8 @@ await test('pliki JSON i składnia JavaScript', () => {
   const manifest = JSON.parse(read('manifest.webmanifest'));
   JSON.parse(read('data/sample-weeks.json'));
   assert.equal(manifest.id, '/Harmonogram-MOW/');
+  assert.equal(manifest.start_url, '/Harmonogram-MOW/');
+  assert.equal(manifest.scope, '/Harmonogram-MOW/');
   assert.equal(manifest.lang, 'pl');
   assert.ok(manifest.icons.some(icon => icon.purpose === 'any'));
   assert.ok(manifest.icons.some(icon => icon.purpose === 'maskable'));
@@ -42,7 +45,7 @@ await test('funkcje dat, URL i normalizacji frontendu', () => {
   const app = read('assets/app.js');
   const start = app.indexOf('function normalizeBackendUrl');
   assert.ok(start > 0, 'Nie znaleziono funkcji frontendu do testów');
-  const context = vm.createContext({ URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 8, INTERNAT_CACHE_SCHEMA: 'school-year-parser-v2' });
+  const context = vm.createContext({ URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 60, INTERNAT_CACHE_SCHEMA: 'canonical-latest-v2' });
   new vm.Script(`${app.slice(start)}\n    globalThis.frontend = { normalizeBackendUrl, parseLocalDate, addDaysIso, durationHours, normalizeWeek, escapeHtml, formatDateTime, toLocalIsoDate };`
   ).runInContext(context);
   const api = context.frontend;
@@ -67,7 +70,7 @@ await test('żądania Apps Script wymuszają właściwe konto Google', () => {
   const app = read('assets/app.js');
   const start = app.indexOf('function normalizeBackendUrl');
   const context = vm.createContext({
-    URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 8,
+    URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 60,
     state: {
       backendUrl: 'https://script.google.com/macros/s/ABC/exec',
       educator: 'Dymek',
@@ -88,7 +91,7 @@ await test('żądania Apps Script wymuszają właściwe konto Google', () => {
 await test('most iframe akceptuje wyłącznie właściwą odpowiedź z ramki Google', () => {
   const app = read('assets/app.js');
   const start = app.indexOf('function normalizeBackendUrl');
-  const context = vm.createContext({ URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 8 });
+  const context = vm.createContext({ URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 60 });
   new vm.Script(`${app.slice(start)}\n    globalThis.bridgeProtocol = { isAllowedBridgeOrigin, isExpectedBridgeMessage };`
   ).runInContext(context);
   const api = context.bridgeProtocol;
@@ -107,7 +110,7 @@ await test('most iframe akceptuje wyłącznie właściwą odpowiedź z ramki Goo
 await test('pełny plan grupuje dyżury i zachowuje aktualny cache', () => {
   const app = read('assets/app.js');
   const start = app.indexOf('function normalizeBackendUrl');
-  const context = vm.createContext({ URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 8, INTERNAT_CACHE_SCHEMA: 'school-year-parser-v2' });
+  const context = vm.createContext({ URL, Intl, Date, console, setTimeout, clearTimeout, Blob, MAX_INTERNAT_CACHE_WEEKS: 60, INTERNAT_CACHE_SCHEMA: 'canonical-latest-v2' });
   new vm.Script(`${app.slice(start)}\n    globalThis.internatUi = { getInternatShiftGroup, groupInternatShifts, mergeInternatWeekCache, migratePersistedInternatWeeks, validateInternatWeekDays };`
   ).runInContext(context);
   const api = context.internatUi;
@@ -130,13 +133,25 @@ await test('pełny plan grupuje dyżury i zachowuje aktualny cache', () => {
   ] }];
   assert.equal(context.internatUi.validateInternatWeekDays(mixedDays).length, 2, 'Widok ma ostrzegać o mieszaniu trybów i ponad 24 h');
 
-  const cached = { '2026-08-10': { weekStart: '2026-08-10', sourceVersion: 'abc', days: [], cacheSchema: 'school-year-parser-v2', validationWarnings: [] } };
+  const cached = { '2026-08-10': { weekStart: '2026-08-10', sourceVersion: 'abc', days: [], cacheSchema: 'canonical-latest-v2', validationWarnings: [] } };
   const retained = api.mergeInternatWeekCache(cached, {}, [{ weekStart: '2026-08-10', sourceVersion: 'abc' }], false);
   assert.ok(retained['2026-08-10'], 'Dashboard nie może usuwać aktualnego planu internatu z cache');
   const migrated = api.migratePersistedInternatWeeks({ '2026-08-31': { weekStart: '2026-08-31', days: [] } });
   assert.deepEqual(Object.keys(migrated), [], 'Cache sprzed poprawki parsera musi zostać automatycznie odrzucony');
   const invalidated = api.mergeInternatWeekCache(cached, {}, [{ weekStart: '2026-08-10', sourceVersion: 'nowa-wersja' }], false);
-  assert.equal(invalidated['2026-08-10'], undefined, 'Nowa wersja źródła musi unieważnić stary cache');
+  assert.ok(invalidated['2026-08-10'], 'Bez kompletnej odpowiedzi backendu ostatni poprawny cache może pozostać lokalnie');
+  const canonicalIncoming = {
+    '2026-08-17': {
+      weekStart: '2026-08-17',
+      sourceVersion: 'canonical-new',
+      days: [],
+      cacheSchema: 'canonical-latest-v2',
+      validationWarnings: []
+    }
+  };
+  const replaced = api.mergeInternatWeekCache(cached, canonicalIncoming, [{ weekStart: '2026-08-17', sourceVersion: 'canonical-new' }], true);
+  assert.ok(replaced['2026-08-10'], 'Brak tygodnia w odpowiedzi backendu nie może usuwać zapisanej historii');
+  assert.ok(replaced['2026-08-17'], 'Nowy kanoniczny tydzień musi zostać dopisany do cache internatu');
 });
 
 class MockBlob {
@@ -294,24 +309,35 @@ await test('synchronizacja kalendarza jest idempotentna i nie usuwa przed wstawi
   assert.equal(runtime.context.secondSync.unchanged, 1);
 });
 
-await test('interfejs 12.4.1 ma jedno menu, auto-synchronizację i wersjonowane zasoby', () => {
+await test('interfejs 12.5.7 korzysta z Apps Script i istniejących tokenów', () => {
   const html = read('index.html');
   const app = read('assets/app.js');
   const worker = read('service-worker.js');
-  const sample = JSON.parse(read('data/sample-weeks.json'));
   const packageData = JSON.parse(read('package.json'));
-  assert.equal(packageData.version, '12.4.1');
+  assert.equal(packageData.version, '12.5.7');
   assert.equal((html.match(/id="actionsMenu"/g) || []).length, 1);
-  assert.match(html, /<option value="internat">Cały internat<\/option>/);
-  assert.match(html, /assets\/app\.js\?v=12\.4\.1/);
-  assert.match(html, /assets\/styles\.css\?v=12\.4\.1/);
-  assert.match(app, /autoRefreshFromBackend\('start'\)/);
-  assert.match(app, /state\.adminToken \? 'sync' : 'dashboard'/);
-  assert.match(worker, /APP_VERSION = '12\.4\.1'/);
-  assert.match(app, /searchParams\.set\('authuser', '0'\)/);
-  assert.match(app, /<details class="internat-day/);
-  assert.match(app, /<details class="internat-group/);
-  assert.ok(sample.internatWeeks?.['2026-06-08'], 'Brak demonstracyjnego planu całego internatu');
+  assert.match(html, /assets\/app\.js\?v=12\.5\.7/);
+  assert.match(html, /assets\/styles\.css\?v=12\.5\.7/);
+  assert.match(worker, /APP_VERSION = '12\.5\.7'/);
+  assert.match(html, /VIEW_TOKEN/);
+  assert.match(html, /ADMIN_TOKEN/);
+  assert.doesNotMatch(html, /id="syncToken"/);
+  assert.doesNotMatch(app, /getSharedMailScheduleToken|MAIL_SCHEDULE_BACKEND_URL|Token synchronizacji grafiku Render\/IMAP/);
+  assert.match(app, /if \(!state\.backendUrl \|\| \(!state\.adminToken && !state\.viewToken\)\) return/);
+  assert.match(app, /const action = state\.adminToken && !options\.automatic \? 'sync' : 'dashboard'/);
+});
+
+await test('Pobierz i test backendu używają Apps Script przez VIEW_TOKEN lub ADMIN_TOKEN', () => {
+  const app = read('assets/app.js');
+  const requestStart = app.indexOf('async function requestBackend');
+  const requestEnd = app.indexOf('\nfunction buildPublicTestUrl', requestStart);
+  const requestBody = app.slice(requestStart, requestEnd);
+  assert.match(requestBody, /iframeBridge/);
+  assert.match(requestBody, /jsonp/);
+  assert.match(app, /backendUrlWithParams\('ping'\)/);
+  assert.match(app, /if \(state\.adminToken\) url\.searchParams\.set\('token', state\.adminToken\)/);
+  assert.match(app, /else if \(state\.viewToken\) url\.searchParams\.set\('token', state\.viewToken\)/);
+  assert.match(app, /url\.searchParams\.set\('authuser', '0'\)/);
 });
 
 await test('service worker nie przechwytuje obcych i nieznanych zasobów', async () => {
@@ -356,6 +382,69 @@ await test('service worker nie przechwytuje obcych i nieznanych zasobów', async
   handlers.activate({ waitUntil: promise => { activation = promise; } });
   await activation;
   assert.deepEqual(deleted, ['harmonogram-mow-shell-old']);
+});
+
+await test('skan poczty nie blokuje korekt za już przetworzonymi załącznikami', () => {
+  const properties = new Map();
+  const parsed = [];
+  const context = vm.createContext({ Date, Logger: { log() {} },
+    PropertiesService: { getScriptProperties: () => ({
+      getProperty: key => properties.get(key),
+      setProperty: (key, value) => properties.set(key, value)
+    }) }
+  });
+  vm.runInContext(read('apps-script/Code.gs'), context);
+  context.sha256_ = value => crypto.createHash('sha256').update(String(value)).digest('hex');
+  context.pruneProcessedMarkers_ = () => {};
+  context.toIsoDate_ = date => date.toISOString().slice(0, 10);
+  context.detectExplicitWeek_ = () => null;
+  context.isWeekInScanWindow_ = () => true;
+  context.parseDocxAttachmentToScheduleDocument_ = (blob, source) => {
+    parsed.push(source.messageId);
+    return { weekStart: '2026-09-14', source };
+  };
+  context.saveScheduleDocument_ = () => ({ changed: true });
+  const messages = Array.from({ length: 71 }, (_, index) => {
+    const id = String(index);
+    const filename = 'harmonogram.docx';
+    if (index < 35) {
+      const digest = context.sha256_(id);
+      properties.set('processed:' + context.sha256_([id, filename, 1, digest].join('|')), 'done');
+    }
+    return {
+      getFrom: () => 'dariusz.gorski@mowmalbork.pl',
+      getSubject: () => 'Aktualizacja harmonogramu',
+      getDate: () => new Date('2026-09-14T10:00:00Z'),
+      getId: () => id,
+      getAttachments: () => [{ getName: () => filename, getSize: () => 1,
+        getBytes: () => id, copyBlob: () => ({}) }]
+    };
+  });
+  context.GmailApp = { search: () => [{ getMessages: () => messages }] };
+  const first = context.scanMailbox_();
+  assert.equal(first.errors.length, 0);
+  assert.equal(first.attachmentsProcessed, 35, 'Zapisane załączniki nie mogą zużywać limitu nowych odczytów');
+  assert.equal(first.attachmentsAttempted, 35);
+  assert.equal(first.attachmentsSkippedByLimit, 1);
+  assert.equal(parsed[0], '35');
+  const second = context.scanMailbox_();
+  assert.equal(second.attachmentsProcessed, 1, 'Kolejny skan musi przetworzyć pozostałą korektę');
+  assert.equal(second.attachmentsAttempted, 1);
+  assert.equal(second.attachmentsSkippedByLimit, 0);
+  assert.equal(parsed.at(-1), '70');
+  assert.equal(context.scanMailbox_().attachmentsAttempted, 0);
+});
+
+await test('zastępstwo zapisane małym z zachowuje wychowawcę i godziny', () => {
+  const context = vm.createContext({});
+  vm.runInContext(read('apps-script/Code.gs'), context);
+  for (const prefix of ['zast.', 'Zast.']) {
+    const tokens = context.extractShiftTokens_('1800-2200\n' + prefix + ' Dymek');
+    assert.equal(tokens.length, 1);
+    assert.equal(tokens[0].name, 'Dymek');
+    assert.equal(tokens[0].start.hour, 18);
+    assert.equal(tokens[0].end.hour, 22);
+  }
 });
 
 console.log(`OK — ${results.length} zestawów testów`);
