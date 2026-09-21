@@ -1,8 +1,8 @@
 # Harmonogram MOW
 
-PWA do pobierania grafików internatu z Gmaila, odczytu plików DOCX, prezentowania dyżurów wychowawców oraz synchronizacji wybranych wpisów z Kalendarzem Google. Frontend jest statyczną aplikacją HTML/CSS/JavaScript. Podstawowe odświeżanie grafiku korzysta z backendu Render/IMAP Asystenta MOW, a Google Apps Script pozostaje ścieżką awaryjną i obsługuje funkcje Kalendarza.
+PWA do pobierania grafików internatu z Gmaila, odczytu plików DOCX, prezentowania dyżurów wychowawców oraz synchronizacji wybranych wpisów z Kalendarzem Google. Frontend jest statyczną aplikacją HTML/CSS/JavaScript. Jedynym źródłem grafiku pracy jest kanoniczny backend Render/IMAP współdzielony z Asystentem MOW. Google Apps Script nie jest źródłem ani fallbackiem grafiku; pozostaje w repo dla funkcji Kalendarza i zgodności historycznej.
 
-Aktualna wersja frontendu: **12.4.5**
+Aktualna wersja frontendu: **12.5.0**
 Ostatni pełny audyt: **26 sierpnia 2026**
 Repozytorium: [JarekDymek/Harmonogram-MOW](https://github.com/JarekDymek/Harmonogram-MOW)
 
@@ -10,7 +10,7 @@ Repozytorium: [JarekDymek/Harmonogram-MOW](https://github.com/JarekDymek/Harmono
 
 - pobiera z Gmaila załączniki DOCX wysłane przez skonfigurowanego nadawcę;
 - rozpoznaje zwykłe grafiki internatu, grafiki wakacyjne i korekty;
-- wybiera najlepszy dokument dla tygodnia i wskazanego wychowawcy;
+- dla każdego tygodnia wybiera dokładnie jeden najnowszy dokument grafiku internatu i nigdy nie uzupełnia go starszą wersją;
 - dzieli nocny dyżur przechodzący przez północ na właściwe części dwóch dni;
 - pokazuje godziny, nadgodziny, pracę weekendową, zmiany i ostrzeżenia;
 - przechowuje historię tygodni oraz listę wykrytych wychowawców;
@@ -225,7 +225,7 @@ Aktualny manifest używa osobnych, skalowalnych ikon SVG typu `any` i `maskable`
 
 ### Jak sprawdzić i wymusić aktualizację PWA
 
-Numer uruchomionego frontendu jest zawsze widoczny po rozwinięciu **Ustawienia**. Dla tego wydania powinien wynosić `12.4.1`.
+Numer uruchomionego frontendu jest zawsze widoczny po rozwinięciu **Ustawienia**. Dla tego wydania powinien wynosić `12.5.0`.
 
 Na komputerze:
 
@@ -447,3 +447,23 @@ Automatyczny start pobiera zapisany dashboard również przy ustawionym tokenie 
 - tylko nowsza, niepełna korekta może zostać nałożona na najnowszy pełny grafik;
 - zapis `zast. Dymek` jest rozpoznawany jako dyżur Dymka, a nie jako osobna osoba „zast Dymek”;
 - zmiana wersji do 12.4.5 wymusza nowy cache PWA po aktualizacji backendu.
+
+
+## Invariant danych grafiku 12.5.0
+
+Grafik ma jedno źródło prawdy: `POST /api/schedule-dashboard` backendu Render Asystenta MOW. Dla każdego `weekStart` obowiązuje dokładnie jeden, najnowszy dokument grafiku internatu według czasu oryginalnej wiadomości, UID i kolejności załącznika.
+
+Starsze dokumenty mogą pozostać w archiwum do audytu, ale nie uczestniczą w obliczaniu godzin. Nowszy dokument nie jest scalany ze starszym nawet wtedy, gdy w temacie zawiera słowo „korekta”. Jeżeli najnowszy dokument jest niepełny albo nieczytelny, aplikacja pokazuje ostrzeżenie i nie przywraca danych ze starszego grafiku.
+
+Harmonogram MOW i zakładka Grafik Asystenta MOW korzystają z tej samej odpowiedzi kanonicznej. Apps Script nie jest fallbackiem grafiku. Awaria Rendera nie zmienia danych: aplikacja pozostawia ostatnią poprawnie zapisaną wersję. Dane demonstracyjne można załadować wyłącznie ręcznie.
+
+Backend przekazuje `schedulePolicyRevision=latest-document-per-week-v1`, globalne `scheduleRevision` oraz `sourceVersion` każdego tygodnia. Frontend odrzuca odpowiedź o innej polityce. Historia grafiku jest skanowana od stałej daty archiwum, a nie z ruchomego okna zależnego od bieżącego dnia.
+
+## Zmiany 12.5.0
+
+- wspólne kanoniczne źródło Render/IMAP dla Harmonogram MOW i Asystent MOW;
+- dokładnie jeden najnowszy dokument internatu na tydzień;
+- usunięty fallback do Apps Script, automatyczne dane demonstracyjne i scalanie starego cache;
+- usunięte dopisywanie rekordów poprzedniego tygodnia i grafików innych zespołów;
+- zachowanie ostatniego poprawnego planu przy błędzie backendu;
+- nowy cache PWA `12.5.0` i testy regresji architektury.
