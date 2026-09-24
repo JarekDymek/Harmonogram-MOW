@@ -1,6 +1,6 @@
 const CONFIG = {
   appName: 'Harmonogram MOW',
-  backendVersion: '2026-09-16-scan-and-substitution',
+  backendVersion: '2026-09-24-calendar-week-source-guard',
   securityMode: 'token',
   sourceEmail: 'dariusz.gorski@mowmalbork.pl',
   forwardingEmail: 'dymek.jaroslaw@mowmalbork.pl',
@@ -269,6 +269,7 @@ function scanAndSync() {
 
 function scanAndSyncUnlocked_() {
   const scanResult = scanMailbox_();
+  scanResult.storageSanitization = sanitizeAllStoredScheduleDocs_();
   scanResult.calendarSyncedWeeks = syncCalendarWeeks_(scanResult.changedWeeks.concat(getVisibleStoredWeekStarts_()));
   try {
     scanResult.currentInfoCalendar = syncDirectorInfoToCalendar_();
@@ -292,6 +293,7 @@ function withScriptLock_(label, callback) {
 }
 
 function syncVisibleWeeksToCalendar_() {
+  sanitizeAllStoredScheduleDocs_();
   return syncCalendarWeeks_(getVisibleStoredWeekStarts_());
 }
 
@@ -500,6 +502,13 @@ function scanMailbox_() {
 
           const saveResult = saveScheduleDocument_(doc);
           props.setProperty(key, new Date().toISOString());
+          if (saveResult.rejected) {
+            attachmentsIgnored++;
+            const rejectedMessage = filename + ' | ' + saveResult.reason;
+            ignored.push(rejectedMessage);
+            Logger.log('REJECTED DOC: ' + rejectedMessage);
+            return;
+          }
           if (saveResult.changed) {
             changedWeeks[doc.weekStart] = true;
           }
@@ -619,6 +628,13 @@ function scoreScheduleSource_(source, text) {
 }
 
 function saveScheduleDocument_(doc) {
+  const guard = validateScheduleDocumentWeek_(doc, doc && doc.weekStart);
+  if (!guard.ok) {
+    const filename = doc && doc.source ? doc.source.filename : '(brak nazwy)';
+    Logger.log('ODRZUCONO dokument grafiku: ' + filename + ' | ' + guard.reason);
+    return { changed: false, alert: null, rejected: true, reason: guard.reason };
+  }
+
   const key = docsKey_(doc.weekStart);
   const oldDocs = getScheduleDocs_(doc.weekStart);
   const sameDigest = oldDocs.some(function (item) { return item.source && item.source.digest === doc.source.digest; });
@@ -643,7 +659,51 @@ function saveScheduleDocument_(doc) {
   return { changed: true, alert: alert };
 }
 
-function getScheduleDocs_(weekStart) {
+function detectScheduleDocumentDeclaredWeek_(doc) {
+  if (!doc) return null;
+  const source = doc.source || {};
+  return detectWeekFromSources_([
+    String(source.filename || ''),
+    String(source.subject || ''),
+    String(doc.rawText || '')
+  ], null);
+}
+
+function validateScheduleDocumentWeek_(doc, expectedWeekStart) {
+  const expected = String(expectedWeekStart || '').trim();
+  if (!doc) return { ok: false, declaredWeekStart: '', reason: 'brak dokumentu grafiku' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(expected)) {
+    return { ok: false, declaredWeekStart: '', reason: 'nieprawidłowy tydzień docelowy: ' + expected };
+  }
+
+  const storedWeekStart = String(doc.weekStart || '').trim();
+  if (storedWeekStart && storedWeekStart !== expected) {
+    return {
+      ok: false,
+      declaredWeekStart: '',
+      reason: 'dokument ma zapisany tydzień ' + storedWeekStart + ', a próba dotyczy ' + expected
+    };
+  }
+
+  const declared = detectScheduleDocumentDeclaredWeek_(doc);
+  if (declared && declared.weekStart && declared.weekStart !== expected) {
+    return {
+      ok: false,
+      declaredWeekStart: declared.weekStart,
+      reason: 'zakres dat w źródle wskazuje tydzień ' + declared.weekStart + ', a próba dotyczy ' + expected
+    };
+  }
+
+  return { ok: true, declaredWeekStart: declared && declared.weekStart ? declared.weekStart : '', reason: '' };
+}
+
+function filterScheduleDocsForWeek_(docs, weekStart) {
+  return (Array.isArray(docs) ? docs : []).filter(function (doc) {
+    return validateScheduleDocumentWeek_(doc, weekStart).ok;
+  });
+}
+
+function readScheduleDocsRaw_(weekStart) {
   try {
     const docs = getLargeJsonProperty_(docsKey_(weekStart));
     return Array.isArray(docs) ? docs : [];
@@ -651,6 +711,36 @@ function getScheduleDocs_(weekStart) {
     Logger.log('Nie udało się odczytać dokumentów tygodnia ' + weekStart + ': ' + err.message);
     return [];
   }
+}
+
+function getScheduleDocs_(weekStart) {
+  return filterScheduleDocsForWeek_(readScheduleDocsRaw_(weekStart), weekStart);
+}
+
+function sanitizeStoredScheduleDocsForWeek_(weekStart) {
+  const rawDocs = readScheduleDocsRaw_(weekStart);
+  const safeDocs = filterScheduleDocsForWeek_(rawDocs, weekStart);
+  const removed = rawDocs.length - safeDocs.length;
+  if (!removed) return { weekStart: weekStart, removed: 0, remaining: safeDocs.length };
+
+  if (safeDocs.length) setLargeJsonProperty_(docsKey_(weekStart), safeDocs);
+  else deleteLargeJsonProperty_(docsKey_(weekStart));
+
+  Logger.log('Usunięto ' + removed + ' dokument(y) przypisane do niewłaściwego tygodnia ' + weekStart + '.');
+  return { weekStart: weekStart, removed: removed, remaining: safeDocs.length };
+}
+
+function sanitizeAllStoredScheduleDocs_() {
+  const weekStarts = getStoredWeekStarts_();
+  const result = { weeksChecked: weekStarts.length, weeksChanged: 0, removed: 0, details: [] };
+  weekStarts.forEach(function (weekStart) {
+    const item = sanitizeStoredScheduleDocsForWeek_(weekStart);
+    if (!item.removed) return;
+    result.weeksChanged++;
+    result.removed += item.removed;
+    result.details.push(item);
+  });
+  return result;
 }
 
 function docsKey_(weekStart) { return 'docs:' + weekStart; }
@@ -1119,6 +1209,7 @@ function buildWeekView_(weekStart, educator) {
   const totalHours = round2_(days.reduce(function (sum, day) { return sum + Number(day.hoursDay || 0); }, 0));
   const weekendHours = round2_(days.filter(function (day) { return day.weekend; }).reduce(function (sum, day) { return sum + Number(day.hoursDay || 0); }, 0));
   const source = selected.doc ? selected.doc.source : null;
+  const declaredSourceWeek = selected.doc ? detectScheduleDocumentDeclaredWeek_(selected.doc) : null;
 
   return {
     weekNumber: selected.doc ? selected.doc.weekNumber : null,
@@ -1133,6 +1224,8 @@ function buildWeekView_(weekStart, educator) {
     hasEducatorPlan: selected.found,
     source: source ? source.filename : '',
     sourceInfo: source,
+    sourceWeekStart: selected.doc ? String(selected.doc.weekStart || '') : '',
+    sourceDeclaredWeekStart: declaredSourceWeek && declaredSourceWeek.weekStart ? declaredSourceWeek.weekStart : '',
     sourceVersion: buildDocsVersion_(docs),
     availableDocuments: docs.map(function (doc) { return { filename: doc.source.filename, kind: doc.source.kind, priority: doc.source.priority, messageDate: doc.source.messageDate }; }),
     changes: changes,
@@ -1157,7 +1250,7 @@ function buildInternatWeekView_(weekStart) {
 }
 
 function buildInternatWeekFromDocs_(weekStart, docs) {
-  const sortedDocs = (docs || []).slice().sort(compareDocs_);
+  const sortedDocs = filterScheduleDocsForWeek_(docs, weekStart).slice().sort(compareDocs_);
   const staffMap = {};
   sortedDocs.forEach(function (doc) {
     const names = Array.isArray(doc.educators) && doc.educators.length
@@ -1637,11 +1730,28 @@ function validateEducatorWeekForCalendar_(view) {
   return errors;
 }
 
+function validateCalendarSourceWeek_(view, weekStart) {
+  const errors = [];
+  if (!view || !view.hasData) return errors;
+  if (view.sourceWeekStart && view.sourceWeekStart !== weekStart) {
+    errors.push('źródło ma zapisany tydzień ' + view.sourceWeekStart + ' zamiast ' + weekStart);
+  }
+  if (view.sourceDeclaredWeekStart && view.sourceDeclaredWeekStart !== weekStart) {
+    errors.push('zakres dat źródła wskazuje tydzień ' + view.sourceDeclaredWeekStart + ' zamiast ' + weekStart);
+  }
+  return errors;
+}
+
 function syncWeekToCalendar_(weekStart) {
+  const sanitization = sanitizeStoredScheduleDocsForWeek_(weekStart);
   const view = buildWeekView_(weekStart, CONFIG.calendarEducator);
   if (!view.hasData) {
     Logger.log('Brak dokumentów tygodnia do synchronizacji kalendarza: ' + weekStart);
     return;
+  }
+  const sourceValidationErrors = validateCalendarSourceWeek_(view, weekStart);
+  if (sourceValidationErrors.length) {
+    throw new Error('Wstrzymano zapis grafiku z niewłaściwego tygodnia do Kalendarza: ' + sourceValidationErrors.join('; '));
   }
   const validationErrors = validateEducatorWeekForCalendar_(view);
   if (validationErrors.length) {
@@ -1696,7 +1806,14 @@ function syncWeekToCalendar_(weekStart) {
   });
 
   Logger.log('Kalendarz tydzień ' + weekStart + ': wychowawca=' + CONFIG.calendarEducator + ', dodano=' + inserted + ', zaktualizowano=' + updated + ', usunięto=' + removed);
-  return { weekStart: weekStart, inserted: inserted, updated: updated, removed: removed, unchanged: Object.keys(desiredKeys).length - inserted - updated };
+  return {
+    weekStart: weekStart,
+    inserted: inserted,
+    updated: updated,
+    removed: removed,
+    unchanged: Object.keys(desiredKeys).length - inserted - updated,
+    rejectedSources: sanitization.removed || 0
+  };
 }
 
 function calendarShiftKey_(weekStart, shift) {
