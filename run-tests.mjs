@@ -297,6 +297,57 @@ await test('synchronizacja kalendarza jest idempotentna i nie usuwa przed wstawi
   assert.equal(runtime.context.secondSync.unchanged, 1);
 });
 
+await test('synchronizator usuwa z pamięci grafik przypisany do niewłaściwego tygodnia', () => {
+  const runtime = createAppsScriptContext();
+  new vm.Script(read('apps-script/Code.gs'), { filename: 'apps-script/Code.gs' }).runInContext(runtime.context);
+  runtime.context.testDocs = [
+    {
+      weekNumber: 5,
+      weekStart: '2026-09-21',
+      updatedAt: '2026-09-21T12:00:00.000Z',
+      rawText: ['INTERNAT', '28.09 - 04.10.2026r.', '5.', 'VI', '1230-1700 Dymek', 'NOC'].join('\n'),
+      educators: ['Dymek'],
+      source: {
+        filename: '5. 28.09. - 04.10.2026r..docx',
+        subject: 'Grafik 28.09-04.10.2026r.',
+        messageDate: '2026-09-21T12:00:00.000Z',
+        priority: 90,
+        kind: 'internat',
+        digest: 'wrong-week'
+      }
+    },
+    {
+      weekNumber: 4,
+      weekStart: '2026-09-21',
+      updatedAt: '2026-09-15T20:19:18.000Z',
+      rawText: ['INTERNAT', '21 - 27.09.2026r.', '4.', 'VI', '2000-2200 Dymek', 'NOC'].join('\n'),
+      educators: ['Dymek'],
+      source: {
+        filename: '4. 21-27.09.2026r..docx',
+        subject: 'Grafik internat 21-27 września 2026r.',
+        messageDate: '2026-09-15T20:19:18.000Z',
+        priority: 90,
+        kind: 'internat',
+        digest: 'correct-week'
+      }
+    }
+  ];
+  new vm.Script(`
+    setLargeJsonProperty_('docs:2026-09-21', testDocs);
+    globalThis.guardedView = buildWeekView_('2026-09-21', 'Dymek');
+    globalThis.guardSync = syncWeekToCalendar_('2026-09-21');
+    globalThis.remainingDocs = getLargeJsonProperty_('docs:2026-09-21');
+  `).runInContext(runtime.context);
+
+  assert.equal(runtime.context.guardedView.source, '4. 21-27.09.2026r..docx');
+  assert.equal(runtime.context.guardSync.rejectedSources, 1, 'Synchronizacja powinna usunąć błędnie przypisane źródło');
+  assert.equal(runtime.context.remainingDocs.length, 1);
+  assert.equal(runtime.context.remainingDocs[0].source.filename, '4. 21-27.09.2026r..docx');
+  assert.equal(runtime.calendarEvents.length, 1);
+  assert.match(runtime.calendarEvents[0].description, /Źródło: 4\. 21-27\.09\.2026r\.\.docx/);
+  assert.doesNotMatch(runtime.calendarEvents[0].description, /Źródło: 5\./);
+});
+
 await test('interfejs 12.5.8 korzysta z Apps Script i istniejących tokenów', () => {
   const html = read('index.html');
   const app = read('assets/app.js');
