@@ -99,6 +99,30 @@ function runParserTests() {
   ] }] };
   assertEqual_(validateEducatorWeekForCalendar_(invalidCalendarView).length, 1, 'calendar rejects more than 24 hours per day');
 
+  const correctWeekDoc = {
+    weekStart: '2026-09-21',
+    rawText: ['INTERNAT', '21 - 27.09.2026r.', '4.', 'VI', '2000-2200 Dymek', 'NOC'].join('\n'),
+    source: { filename: '4. 21-27.09.2026r..docx', subject: 'Grafik internat 21-27 września 2026r.' }
+  };
+  const misplacedWeekDoc = {
+    weekStart: '2026-09-21',
+    rawText: ['INTERNAT', '28.09 - 04.10.2026r.', '5.', 'VI', '1230-1700 Dymek', 'NOC'].join('\n'),
+    source: { filename: '5. 28.09. - 04.10.2026r..docx', subject: 'Grafik 28.09-04.10.2026r.' }
+  };
+  assertEqual_(validateScheduleDocumentWeek_(correctWeekDoc, '2026-09-21').ok, true, 'correct week source accepted');
+  assertEqual_(validateScheduleDocumentWeek_(misplacedWeekDoc, '2026-09-21').ok, false, 'cross-week source rejected');
+  assertEqual_(validateScheduleDocumentWeek_(misplacedWeekDoc, '2026-09-21').declaredWeekStart, '2026-09-28', 'cross-week source declared week');
+
+  const guardedFullWeek = buildInternatWeekFromDocs_('2026-09-21', [misplacedWeekDoc, correctWeekDoc]);
+  assertEqual_(guardedFullWeek.source, '4. 21-27.09.2026r..docx', 'full internat ignores misplaced newer source');
+
+  const sourceMismatchView = {
+    hasData: true,
+    sourceWeekStart: '2026-09-21',
+    sourceDeclaredWeekStart: '2026-09-28'
+  };
+  assertEqual_(validateCalendarSourceWeek_(sourceMismatchView, '2026-09-21').length, 1, 'calendar rejects cross-week source');
+
   Logger.log('Parser tests OK');
 }
 
