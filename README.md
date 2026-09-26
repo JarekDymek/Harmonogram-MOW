@@ -1,10 +1,18 @@
 # Harmonogram MOW
 
-PWA do pobierania grafików internatu z Gmaila, odczytu plików DOCX, prezentowania dyżurów wychowawców oraz synchronizacji wybranych wpisów z Kalendarzem Google. Frontend jest statyczną aplikacją HTML/CSS/JavaScript. Jedynym źródłem grafiku pracy jest kanoniczny backend Render/IMAP współdzielony z Asystentem MOW. Google Apps Script nie jest źródłem ani fallbackiem grafiku; pozostaje w repo dla funkcji Kalendarza i zgodności historycznej.
+PWA do pobierania grafików internatu z Gmaila, odczytu plików DOCX, prezentowania dyżurów wychowawców oraz synchronizacji wybranych wpisów z Kalendarzem Google. Frontend jest statyczną aplikacją HTML/CSS/JavaScript. Źródłem danych jest Google Apps Script. Asystent MOW pobiera ten sam grafik przez proxy `POST /api/weekly-plan` na Renderze.
 
-Aktualna wersja frontendu: **12.5.4**
+Aktualna wersja frontendu: **12.5.9**
 Ostatni pełny audyt: **26 sierpnia 2026**
 Repozytorium: [JarekDymek/Harmonogram-MOW](https://github.com/JarekDymek/Harmonogram-MOW)
+
+## Naprawa przypisywania tygodni — 25 września 2026
+
+Daty dokumentu mają pierwszeństwo przed tematem wiadomości. Nazwa załącznika i treść nie mogą wskazywać różnych tygodni: taki dokument jest odrzucany przed zapisem do Kalendarza. Obsługiwane są zakresy z rokiem po obu datach, kropką przed myślnikiem i przejściem między miesiącami. Numer planu szkolnego nie wyznacza dat tygodnia.
+
+Backend `2026-09-25-document-date-guard` oznacza odczyty rewizją `document-dates-v3`. Po jego wdrożeniu kolejny skan ponownie przetwarza stare załączniki (z zachowaniem limitu 35 konwersji na uruchomienie). Wersja źródła zawiera rewizję parsera, dzięki czemu zapisany plan internatu zostaje odświeżony bez kasowania ustawień i tokenów.
+
+**Publikacja GitHub Pages nie aktualizuje Google Apps Script.** W istniejącym projekcie Google należy wgrać `apps-script/Code.gs`, zapisać, wybrać **Wdróż → Zarządzaj wdrożeniami → Edytuj → Nowa wersja → Wdróż**, zachowując ten sam adres `/exec`. Następnie uruchomić synchronizację administracyjną. Jeżeli skan zgłasza limit, następne uruchomienie przetworzy pozostałe pliki. Zweryfikować zakresy 21–27.09 i 28.09–04.10 osobno oraz źródła wpisów Dymka w Kalendarzu.
 
 ## Co robi aplikacja
 

@@ -1,4 +1,4 @@
-const APP_VERSION = '12.5.8';
+const APP_VERSION = '12.5.9';
 const STORAGE_KEY = 'harmonogram-mow-state-v12';
 const SETTINGS_KEY = 'harmonogram-mow-settings-v1';
 const LEGACY_STORAGE_KEYS = ['harmonogram-mow-state-v11', 'harmonogram-mow-state-v10', 'harmonogram-mow-state-v9', 'harmonogram-mow-state-v8'];

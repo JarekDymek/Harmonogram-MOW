@@ -1,6 +1,7 @@
 const CONFIG = {
   appName: 'Harmonogram MOW',
-  backendVersion: '2026-09-24-calendar-week-source-guard',
+  backendVersion: '2026-09-25-document-date-guard',
+  parserRevision: 'document-dates-v3',
   securityMode: 'token',
   sourceEmail: 'dariusz.gorski@mowmalbork.pl',
   forwardingEmail: 'dymek.jaroslaw@mowmalbork.pl',
@@ -450,7 +451,7 @@ function scanMailbox_() {
           if (!/\.docx$/i.test(filename)) return;
           attachmentsSeen++;
 
-          const explicitWeek = detectExplicitWeek_(filename, subject);
+          const explicitWeek = detectExplicitWeek_(filename, '');
           if (explicitWeek && !isWeekInScanWindow_(explicitWeek.weekStart)) {
             attachmentsSkippedByWindow++;
             Logger.log('SKIP WINDOW: ' + filename + ' | week=' + explicitWeek.weekStart);
@@ -459,7 +460,7 @@ function scanMailbox_() {
 
           const bytes = attachment.getBytes();
           const digest = sha256_(bytes);
-          const key = 'processed:' + sha256_([messageId, filename, size, digest].join('|'));
+          const key = 'processed:' + sha256_([CONFIG.parserRevision, messageId, filename, size, digest].join('|'));
 
           if (props.getProperty(key)) {
             Logger.log('Pominięto już przetworzony załącznik: ' + filename);
@@ -560,6 +561,7 @@ function parseDocxAttachmentToScheduleDocument_(blob, source) {
 
     return {
       ignored: false,
+      parserRevision: CONFIG.parserRevision,
       weekNumber: weekNumber,
       weekStart: week.weekStart,
       weekEnd: week.weekEnd,
@@ -637,11 +639,11 @@ function saveScheduleDocument_(doc) {
 
   const key = docsKey_(doc.weekStart);
   const oldDocs = getScheduleDocs_(doc.weekStart);
-  const sameDigest = oldDocs.some(function (item) { return item.source && item.source.digest === doc.source.digest; });
+  const sameDigest = oldDocs.some(function (item) { return item.source && item.source.digest === doc.source.digest && item.parserRevision === doc.parserRevision; });
   if (sameDigest) return { changed: false, alert: null };
 
   const previousTop = oldDocs.length ? oldDocs.slice().sort(compareDocs_)[0] : null;
-  const docs = oldDocs.concat([doc]).sort(compareDocs_).slice(0, CONFIG.maxDocsPerWeek);
+  const docs = oldDocs.filter(function (item) { return !item.source || item.source.digest !== doc.source.digest; }).concat([doc]).sort(compareDocs_).slice(0, CONFIG.maxDocsPerWeek);
   setLargeJsonProperty_(key, docs);
   pruneStoredDocs_();
 
@@ -663,9 +665,9 @@ function detectScheduleDocumentDeclaredWeek_(doc) {
   if (!doc) return null;
   const source = doc.source || {};
   return detectWeekFromSources_([
+    String(doc.rawText || ''),
     String(source.filename || ''),
-    String(source.subject || ''),
-    String(doc.rawText || '')
+    String(source.subject || '')
   ], null);
 }
 
@@ -685,7 +687,14 @@ function validateScheduleDocumentWeek_(doc, expectedWeekStart) {
     };
   }
 
-  const declared = detectScheduleDocumentDeclaredWeek_(doc);
+  // Temat odpowiedzi może nadal opisywać wcześniejszy tydzień. Dokument i
+  // nazwa załącznika muszą jednak zgadzać się ze sobą i tygodniem docelowym.
+  const source = doc.source || {};
+  const documentWeeks = [doc.rawText, source.filename].map(function (value) {
+    return detectWeekFromSources_([String(value || '')], null);
+  }).filter(Boolean);
+  const conflicting = documentWeeks.find(function (week) { return week.weekStart !== expected; });
+  const declared = conflicting || detectScheduleDocumentDeclaredWeek_(doc);
   if (declared && declared.weekStart && declared.weekStart !== expected) {
     return {
       ok: false,
@@ -822,7 +831,7 @@ function buildDocsVersion_(docs) {
     const source = doc && doc.source ? doc.source : {};
     return source.digest || [source.filename || '', source.messageDate || '', doc.updatedAt || ''].join('|');
   }).filter(Boolean);
-  return parts.length ? sha256_(parts.join('||')) : '';
+  return parts.length ? sha256_(CONFIG.parserRevision + '||' + parts.join('||')) : '';
 }
 
 function isCorrectionDocument_(doc) {
@@ -1919,7 +1928,7 @@ function buildShift_(weekStartIso, dayIndex, start, end, type, label) {
 }
 
 function detectWeek_(filename, subject, text, messageDate) {
-  return detectWeekFromSources_([String(filename || ''), String(subject || ''), String(text || '')], messageDate || new Date());
+  return detectWeekFromSources_([String(text || ''), String(filename || ''), String(subject || '')], messageDate || new Date());
 }
 
 function detectWeekNumber_(filename, text) {
@@ -1939,23 +1948,22 @@ function detectWeekFromSources_(sources, fallbackDate) {
       .replace(/[–—]/g, '-')
       .replace(/\s+/g, ' ')
       .replace(/(^|\s)\d{1,3}\.\s+(?=\d{1,2}(?:\s*[.\/]\s*\d{1,2})?\s*-)/g, '$1');
-    const rangeRegex = /(?:^|[^\d])(\d{1,2})(?:\s*[.\/]\s*(\d{1,2}))?\s*-\s*(\d{1,2})\s*[.\/]\s*(\d{1,2})\s*[\/.]?\s*(20\d{2})/g;
+    const rangeRegex = /(?:^|[^\d])(\d{1,2})(?:\s*[.\/]\s*(\d{1,2}))?(?:\s*[.\/]\s*(20\d{2}))?\s*\.?\s*(?:r\.?)?\s*-\s*(\d{1,2})\s*[.\/]\s*(\d{1,2})\s*[\/.]?\s*(20\d{2})/g;
     let match;
     while ((match = rangeRegex.exec(source)) !== null) {
       const startDay = Number(match[1]);
       const startMonthRaw = match[2] ? Number(match[2]) : null;
-      const endDay = Number(match[3]);
-      const endMonth = Number(match[4]);
-      const year = Number(match[5]);
-      if (!isValidDayMonth_(startDay, endMonth)) continue;
+      const endDay = Number(match[4]);
+      const endMonth = Number(match[5]);
+      const year = Number(match[6]);
       if (!isValidDayMonth_(endDay, endMonth)) continue;
       let startMonth = startMonthRaw || endMonth;
-      let startYear = year;
+      let startYear = match[3] ? Number(match[3]) : year;
       if (!startMonthRaw && startDay > endDay) {
         startMonth = endMonth - 1;
         if (startMonth < 1) { startMonth = 12; startYear = year - 1; }
       }
-      if (startMonthRaw && startMonth > endMonth) startYear = year - 1;
+      if (!match[3] && startMonthRaw && startMonth > endMonth) startYear = year - 1;
       if (!isValidDateParts_(startYear, startMonth, startDay) || !isValidDateParts_(year, endMonth, endDay)) continue;
       const startDate = new Date(startYear, startMonth - 1, startDay);
       const endDate = new Date(year, endMonth - 1, endDay);

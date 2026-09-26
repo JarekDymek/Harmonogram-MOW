@@ -214,6 +214,29 @@ function createAppsScriptContext() {
   return { context, properties, scriptProperties, calendarEvents, calendarOperations };
 }
 
+await test('daty dokumentu rozdzielają tygodnie 4 i 5 mimo starego tematu maila', () => {
+  const { context } = createAppsScriptContext();
+  vm.runInContext(read('apps-script/Code.gs'), context);
+  const subject = 'Grafik 21-27.09.2026';
+  assert.equal(context.detectWeek_('grafik.docx', subject, 'INTERNAT 28.09.2026 - 04.10.2026', new Date('2026-09-25')).weekStart, '2026-09-28');
+  assert.equal(context.detectWeek_('5. 28.09. - 04.10.2026r..docx', subject, '', null).weekStart, '2026-09-28');
+  assert.equal(context.detectWeekFromSources_(['31.08 - 06.09.2026'], null).weekStart, '2026-08-31');
+  const conflicting = { weekStart: '2026-09-21', source: { filename: '4. 21-27.09.2026.docx' }, rawText: 'INTERNAT 28.09.2026 - 04.10.2026' };
+  assert.equal(context.validateScheduleDocumentWeek_(conflicting, '2026-09-21').ok, false);
+  assert.equal(context.detectWeekFromSources_(['28.12.2026 - 03.01.2027'], null).weekStart, '2026-12-28');
+  assert.equal(context.detectWeekFromSources_(['31.02 - 06.03.2026'], null), null);
+  const oldDoc = {
+    weekStart: '2026-09-21', rawText: '21-27.09.2026\nINTERNAT',
+    source: { digest: 'same-file', filename: '4. 21-27.09.2026.docx', messageDate: '2026-09-18T12:00:00Z', priority: 90 }
+  };
+  context.setLargeJsonProperty_('docs:2026-09-21', [oldDoc]);
+  const newDoc = { ...oldDoc, parserRevision: 'document-dates-v3', rawText: oldDoc.rawText + '\nVI\n0600-1200 Dymek' };
+  assert.equal(context.saveScheduleDocument_(newDoc).changed, true, 'Nowy parser musi zastąpić odczyt pliku o tym samym skrócie');
+  assert.equal(context.getScheduleDocs_('2026-09-21').length, 1);
+  assert.equal(context.getScheduleDocs_('2026-09-21')[0].rawText, newDoc.rawText);
+  assert.equal(context.saveScheduleDocument_(newDoc).changed, false, 'Ponowny zapis aktualnego odczytu nie tworzy duplikatu');
+});
+
 await test('testy regresji parsera Apps Script', () => {
   const { context } = createAppsScriptContext();
   new vm.Script(read('apps-script/Code.gs'), { filename: 'apps-script/Code.gs' }).runInContext(context);
@@ -348,16 +371,16 @@ await test('synchronizator usuwa z pamięci grafik przypisany do niewłaściwego
   assert.doesNotMatch(runtime.calendarEvents[0].description, /Źródło: 5\./);
 });
 
-await test('interfejs 12.5.8 korzysta z Apps Script i istniejących tokenów', () => {
+await test('interfejs 12.5.9 korzysta z Apps Script i istniejących tokenów', () => {
   const html = read('index.html');
   const app = read('assets/app.js');
   const worker = read('service-worker.js');
   const packageData = JSON.parse(read('package.json'));
-  assert.equal(packageData.version, '12.5.8');
+  assert.equal(packageData.version, '12.5.9');
   assert.equal((html.match(/id="actionsMenu"/g) || []).length, 1);
-  assert.match(html, /assets\/app\.js\?v=12\.5\.8/);
-  assert.match(html, /assets\/styles\.css\?v=12\.5\.8/);
-  assert.match(worker, /APP_VERSION = '12\.5\.8'/);
+  assert.match(html, /assets\/app\.js\?v=12\.5\.9/);
+  assert.match(html, /assets\/styles\.css\?v=12\.5\.9/);
+  assert.match(worker, /APP_VERSION = '12\.5\.9'/);
   assert.match(html, /VIEW_TOKEN/);
   assert.match(html, /ADMIN_TOKEN/);
   assert.doesNotMatch(html, /id="syncToken"/);
@@ -452,7 +475,10 @@ await test('skan poczty nie blokuje korekt za już przetworzonymi załącznikami
     const filename = 'harmonogram.docx';
     if (index < 35) {
       const digest = context.sha256_(id);
-      properties.set('processed:' + context.sha256_([id, filename, 1, digest].join('|')), 'done');
+      properties.set('processed:' + context.sha256_(['document-dates-v3', id, filename, 1, digest].join('|')), 'done');
+    }
+    if (index === 70) {
+      properties.set('processed:' + context.sha256_([id, filename, 1, context.sha256_(id)].join('|')), 'legacy-parser');
     }
     return {
       getFrom: () => 'dariusz.gorski@mowmalbork.pl',
