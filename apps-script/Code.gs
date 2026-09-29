@@ -1,6 +1,6 @@
 const CONFIG = {
   appName: 'Harmonogram MOW',
-  backendVersion: '2026-09-25-document-date-guard',
+  backendVersion: '2026-09-29-substitution-guard',
   parserRevision: 'document-dates-v3',
   securityMode: 'token',
   sourceEmail: 'dariusz.gorski@mowmalbork.pl',
@@ -125,8 +125,10 @@ function backendResponse_(dashboard, scanResult, extra) {
   dashboard = dashboard || {};
   extra = extra || {};
   return {
-    ok: true,
-    status: extra.status || 'ok',
+    ok: !scanResult || scanResult.ok !== false,
+    status: extra.status || (scanResult && (scanResult.ok === false || scanResult.currentInfoCalendarError) ? 'partial-error' : 'ok'),
+    error: scanResult && (scanResult.ok === false || scanResult.currentInfoCalendarError)
+      ? 'Synchronizacja niepełna: ' + (scanResult.errors || []).concat(scanResult.currentInfoCalendarError || []).join('; ') : '',
     action: extra.action || '',
     data: dashboard,
     result: scanResult,
@@ -831,7 +833,7 @@ function buildDocsVersion_(docs) {
     const source = doc && doc.source ? doc.source : {};
     return source.digest || [source.filename || '', source.messageDate || '', doc.updatedAt || ''].join('|');
   }).filter(Boolean);
-  return parts.length ? sha256_(CONFIG.parserRevision + '||' + parts.join('||')) : '';
+  return parts.length ? sha256_(CONFIG.backendVersion + '||' + CONFIG.parserRevision + '||' + parts.join('||')) : '';
 }
 
 function isCorrectionDocument_(doc) {
@@ -895,7 +897,7 @@ function parseInternatSchedule_(text, weekStartIso, educator) {
   const days = makeEmptyDays_(weekStartIso);
   const usedMarkedVacationTable = parseMarkedVacationTable_(normalized, weekStartIso, who, days);
 
-  Object.keys(groupBlocks).forEach(function (groupName) {
+  if (!usedMarkedVacationTable) Object.keys(groupBlocks).forEach(function (groupName) {
     const groupLabel = 'Gr. ' + groupName;
     const block = groupBlocks[groupName];
     const tokens = extractShiftTokens_(block);
@@ -970,14 +972,17 @@ function parseInternatSchedule_(text, weekStartIso, educator) {
 function parseMarkedVacationTable_(text, weekStartIso, educator, days) {
   if (String(text || '').indexOf('__TABLE_ROW__') === -1) return false;
   const rows = String(text || '').split('__TABLE_ROW__').slice(1);
-  let added = 0;
+  let recognizedRows = 0;
 
   rows.forEach(function (rowText) {
     const cells = extractMarkedCells_(rowText);
     const rowLabel = normalizeName_(cells[0] || '');
     const isNightRow = rowLabel === 'noc';
     const groupMatch = rowLabel.match(/^grupa\s+([a-z])$/);
-    if (!isNightRow && !groupMatch) return;
+    const schoolGroup = rowLabel.match(/^(viii|vii|vi|iv|iii|ii|v|i)(?:\s|$)/);
+    if (!isNightRow && !groupMatch && !schoolGroup) return;
+    if (!Object.prototype.hasOwnProperty.call(cells, 7)) return;
+    recognizedRows++;
 
     for (let cellIndex = 1; cellIndex <= 7; cellIndex++) {
       const dayIndex = cellIndex - 1;
@@ -994,8 +999,8 @@ function parseMarkedVacationTable_(text, weekStartIso, educator, days) {
           dayIndex,
           item.start,
           item.end,
-          isNightRow ? 'noc' : 'wakacje',
-          isNightRow ? 'Noc' : 'Grupa ' + groupMatch[1].toUpperCase()
+          isNightRow ? 'noc' : schoolGroup ? (schoolGroup[1] === 'vi' ? 'vi' : 'zast') : 'wakacje',
+          isNightRow ? 'Noc' : schoolGroup ? (schoolGroup[1] === 'vi' ? '' : 'Zast. ') + 'Gr. ' + schoolGroup[1].toUpperCase() : 'Grupa ' + groupMatch[1].toUpperCase()
         );
         shift.personRaw = item.name;
         shift.replacesPerson = isNightRow ? '' : cleanReliefName_(item.replacesPerson || '');
@@ -1004,12 +1009,11 @@ function parseMarkedVacationTable_(text, weekStartIso, educator, days) {
         shift.zmienia = shift.replacedByPerson;
         if (isNightRow) addShiftToDays_(days, shift);
         else days[dayIndex].shifts.push(shift);
-        added++;
       });
     }
   });
 
-  return added > 0;
+  return recognizedRows > 0;
 }
 
 function extractMarkedCells_(rowText) {
@@ -1896,7 +1900,12 @@ function extractShiftTokens_(block) {
   while ((match = re.exec(clean)) !== null) {
     const start = parseTimeToken_(match[1]);
     const end = parseTimeToken_(match[2]);
-    const name = cleanupName_(match[3]);
+    // A replacement below (or beside) the original name owns this shift.
+    // Do not interpret "zast. za pracownika nocnego" as a person's name.
+    const inlineReplacement = match[3].match(/\bzast\.\s+(?!za\b)([A-ZĄĆĘŁŃÓŚŹŻ][A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż.\- ]*)/i);
+    const followingReplacement = clean.slice(re.lastIndex).match(/^[ \t]*\n[ \t]*zast\.[ \t]+(?!za\b)([A-ZĄĆĘŁŃÓŚŹŻ][A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż.\- ]*)/i);
+    const replacement = inlineReplacement || followingReplacement;
+    const name = cleanupName_(replacement ? replacement[1] : match[3]);
     if (!start || !end || !name) continue;
     if (/Łącz/i.test(name)) continue;
     if (/wolne/i.test(name)) continue;

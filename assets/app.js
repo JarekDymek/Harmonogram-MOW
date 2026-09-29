@@ -1,4 +1,4 @@
-const APP_VERSION = '12.5.9';
+const APP_VERSION = '12.5.10';
 const STORAGE_KEY = 'harmonogram-mow-state-v12';
 const SETTINGS_KEY = 'harmonogram-mow-settings-v1';
 const LEGACY_STORAGE_KEYS = ['harmonogram-mow-state-v11', 'harmonogram-mow-state-v10', 'harmonogram-mow-state-v9', 'harmonogram-mow-state-v8'];
@@ -491,7 +491,7 @@ async function refreshFromBackend(options = {}) {
     applyPayload(dashboard);
     if (state.dayFilter === 'internat') await ensureInternatWeekLoaded();
     const suffix = (state.educator || 'Dymek') === (state.calendarEducator || 'Dymek') ? '' : ' Kalendarz Google pozostał tylko dla ' + (state.calendarEducator || 'Dymek') + '.';
-    toast((action === 'sync' ? 'Synchronizacja zakończona.' : 'Widok pobrany.') + suffix);
+    toast((payload.status === 'partial-error' ? payload.error : (action === 'sync' ? 'Synchronizacja zakończona.' : 'Widok pobrany.')) + suffix);
   } catch (error) {
     state.backendError = error.message;
     persist();

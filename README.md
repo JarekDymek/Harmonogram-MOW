@@ -2,7 +2,9 @@
 
 PWA do pobierania grafików internatu z Gmaila, odczytu plików DOCX, prezentowania dyżurów wychowawców oraz synchronizacji wybranych wpisów z Kalendarzem Google. Frontend jest statyczną aplikacją HTML/CSS/JavaScript. Źródłem danych jest Google Apps Script. Asystent MOW pobiera ten sam grafik przez proxy `POST /api/weekly-plan` na Renderze.
 
-Aktualna wersja frontendu: **12.5.9**
+Aktualna wersja frontendu: **12.5.10**
+
+Poprawka 12.5.10: zapis „Pierwotny / zast. Zastępujący” przypisuje dyżur wyłącznie zastępującemu. Dni szkolnego grafiku są odczytywane z kolumn tabeli, także przy łączeniu grup. Zmiana wersji backendu unieważnia cache planu bez usuwania danych użytkownika. Backend wymaga osobnego wdrożenia na istniejącym adresie `/exec`.
 Ostatni pełny audyt: **26 sierpnia 2026**
 Repozytorium: [JarekDymek/Harmonogram-MOW](https://github.com/JarekDymek/Harmonogram-MOW)
 

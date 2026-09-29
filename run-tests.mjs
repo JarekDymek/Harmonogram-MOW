@@ -371,16 +371,16 @@ await test('synchronizator usuwa z pamięci grafik przypisany do niewłaściwego
   assert.doesNotMatch(runtime.calendarEvents[0].description, /Źródło: 5\./);
 });
 
-await test('interfejs 12.5.9 korzysta z Apps Script i istniejących tokenów', () => {
+await test('interfejs 12.5.10 korzysta z Apps Script i istniejących tokenów', () => {
   const html = read('index.html');
   const app = read('assets/app.js');
   const worker = read('service-worker.js');
   const packageData = JSON.parse(read('package.json'));
-  assert.equal(packageData.version, '12.5.9');
+  assert.equal(packageData.version, '12.5.10');
   assert.equal((html.match(/id="actionsMenu"/g) || []).length, 1);
-  assert.match(html, /assets\/app\.js\?v=12\.5\.9/);
-  assert.match(html, /assets\/styles\.css\?v=12\.5\.9/);
-  assert.match(worker, /APP_VERSION = '12\.5\.9'/);
+  assert.match(html, /assets\/app\.js\?v=12\.5\.10/);
+  assert.match(html, /assets\/styles\.css\?v=12\.5\.10/);
+  assert.match(worker, /APP_VERSION = '12\.5\.10'/);
   assert.match(html, /VIEW_TOKEN/);
   assert.match(html, /ADMIN_TOKEN/);
   assert.doesNotMatch(html, /id="syncToken"/);
@@ -514,6 +514,28 @@ await test('zastępstwo zapisane małym z zachowuje wychowawcę i godziny', () =
     assert.equal(tokens[0].start.hour, 18);
     assert.equal(tokens[0].end.hour, 22);
   }
+});
+
+await test('korekta zastępstwa zastępuje osobę i zachowuje niedzielną kolumnę', () => {
+  const { context } = createAppsScriptContext();
+  vm.runInContext(read('apps-script/Code.gs'), context);
+  for (const separator of ['\n', ' ']) {
+    const tokens = context.extractShiftTokens_('800-1400\nPierwotna' + separator + 'zast. Zastepujaca\n1400-2200\nKolejna');
+    assert.deepEqual(Array.from(tokens, t => t.name), ['Zastepujaca', 'Kolejna']);
+  }
+  assert.equal(context.extractShiftTokens_('2200-600 Nocna\nzast. za pracownika nocnego')[0].name, 'Nocna');
+  const row = (group, cells) => '__TABLE_ROW__ __CELL_0__ ' + group + cells.map((s, i) => '\n__CELL_' + (i + 1) + '__ ' + s).join('');
+  const source = 'INTERNAT\n28.09.-04.10.2026\n' + row('VI Kl. 5', ['600-1800 Zastepujaca', '600-1800 Zastepujaca', '', '', '', '', ''])
+    + '\n' + row('VIII 7 B', ['', '', '', '', '', '600-800 Łącz z VII 900-1400 Pierwotna', '600-800 Łącz z VII 800-1400 Pierwotna zast. Zastepujaca 1400-2200 Kolejna']);
+  const plan = context.parseInternatSchedule_(source, '2026-09-28', 'Zastepujaca');
+  assert.equal(plan.totalHours, 30);
+  assert.equal(plan.days[5].hoursDay, 0);
+  assert.equal(plan.days[6].hoursDay, 6);
+  assert.equal(plan.days[6].shifts[0].hours, '08:00–14:00');
+  assert.equal(context.parseInternatSchedule_(source, '2026-09-28', 'Pierwotna').days[6].hoursDay, 0);
+  assert.equal(context.parseInternatSchedule_(source, '2026-09-28', 'Kolejna').days[6].hoursDay, 8);
+  assert.equal(context.backendResponse_({}, {ok: false, errors: ['odczyt']}).ok, false);
+  assert.equal(context.backendResponse_({}, {ok: true, currentInfoCalendarError: 'termin'}).status, 'partial-error');
 });
 
 console.log(`OK — ${results.length} zestawów testów`);
